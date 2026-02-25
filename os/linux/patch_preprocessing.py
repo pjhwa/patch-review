@@ -209,7 +209,9 @@ def get_component_name(vendor, title, summary, full_text):
             ver_suffix = f"-{ol_ver}" if ol_ver else ""
             
             return f"{comp}{kern_series}{ver_suffix}"
-        return "other"
+            
+        # If it's not UEK, fall through to the Ubuntu/RHEL heuristics (Rule 2)
+        # We don't return 'other' immediately anymore.
     
     # 2. Ubuntu/RHEL Heuristics
     # Search primary text first to avoid false positives from body
@@ -257,11 +259,8 @@ def extract_specific_version(text, component, patch_id=None):
 
 def is_system_critical(vendor, component, text):
     comp = component.lower()
-    # Rule 1: Oracle UEK Only
-    if vendor == "Oracle":
-        return "kernel-uek" in comp
     
-    # Rule 2: Strict Whitelist (RHEL/Ubuntu)
+    # Rule 2: Strict Whitelist (RHEL/Ubuntu/Oracle)
     for bad in EXCLUDED_PACKAGES_EXPLICIT:
         if bad == comp or (f"{bad}-" in comp): return False
 
@@ -447,7 +446,10 @@ def preprocess_patches():
         
         review_note = ""
         if latest['vendor'] == "Oracle": 
-            review_note = f"Verify this is UEK kernel ({latest['component']})."
+            if "kernel-uek" in latest['component']:
+                review_note = f"Verify this is UEK kernel ({latest['component']})."
+            else:
+                review_note = f"Verify this is an Oracle Linux system component ({latest['component']})."
         
         latest['review_instructions'] = f"Analyze this '{latest['component']}' patch ({review_note}). Check for System Hang, Data Loss, Boot Fail, or Critical Security. Merge insights from {len(history_context)} previous patches."
         latest['patch_name_suggestion'] = latest['specific_version'] if latest['specific_version'] else latest['component']

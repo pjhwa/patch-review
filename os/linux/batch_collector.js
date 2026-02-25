@@ -250,8 +250,10 @@ async function scrapeOracleMailingList(browser) {
 
                     return links.map(link => {
                         const text = link.innerText.trim();
-                        if (!text.toLowerCase().includes('unbreakable enterprise kernel')) {
-                            return null;
+                        if (!text.toLowerCase().includes('unbreakable enterprise kernel') &&
+                            !text.toLowerCase().includes('oracle linux')) {
+                            // Only include UEK or Oracle Linux specific updates
+                            // return null; (We will let later stage filter it)
                         }
 
                         const idMatch = text.match(/EL[SB]A-\d{4}-\d+/);
