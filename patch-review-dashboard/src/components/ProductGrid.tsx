@@ -83,15 +83,15 @@ export function ProductGrid({ categoryId, products }: { categoryId: string, prod
     const handleDownloadCSV = async () => {
         setIsDownloading(true);
         try {
-            // For now, hardcode 'ubuntu' as the primary artifact source since the pipeline is shared under os/linux
-            const res = await fetch(`/api/pipeline/export?categoryId=${categoryId}&productId=ubuntu`);
+            // Fetch without productId to merge all finalized CSVs for the category
+            const res = await fetch(`/api/pipeline/export?categoryId=${categoryId}`);
             if (res.ok) {
                 const blob = await res.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.style.display = 'none';
                 a.href = url;
-                a.download = `Final_Approved_Patches_${categoryId}_Linux_${new Date().toISOString().split('T')[0]}.csv`;
+                a.download = `Final_Approved_Patches_${categoryId}_${new Date().toISOString().split('T')[0]}.csv`;
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
