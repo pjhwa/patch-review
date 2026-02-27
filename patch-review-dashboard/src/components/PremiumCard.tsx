@@ -8,7 +8,7 @@ import { Loader2, CheckCircle2 } from "lucide-react";
 export function PremiumCard({
     title, stages, desc, active, href, categoryId, productId, isRunning, onRunPipeline, isReviewCompleted
 }: {
-    title: string, stages?: { collected: number, preprocessed: number, reviewed: number }, desc: string, active: boolean, href: string, categoryId: string, productId: string, isRunning?: boolean, onRunPipeline?: () => void, isReviewCompleted?: boolean
+    title: string, stages?: { collected: number, preprocessed: number, reviewed: number, approved?: number }, desc: string, active: boolean, href: string, categoryId: string, productId: string, isRunning?: boolean, onRunPipeline?: () => void, isReviewCompleted?: boolean
 }) {
 
     return (
@@ -29,8 +29,10 @@ export function PremiumCard({
                                 <span className="text-2xl font-light tracking-tighter text-emerald-400/80">{stages.preprocessed}</span>
                             </div>
                             <div className="flex flex-col border-l border-white/5 pl-2">
-                                <span className="text-xs text-white/40 mb-1">Reviewed</span>
-                                <span className="text-2xl font-light tracking-tighter text-blue-400/80">{stages.reviewed}</span>
+                                <span className="text-xs text-white/40 mb-1">{isReviewCompleted ? 'Approved' : 'Reviewed'}</span>
+                                <span className={`text-2xl font-light tracking-tighter ${isReviewCompleted ? 'text-emerald-400/80 drop-shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'text-blue-400/80'}`}>
+                                    {isReviewCompleted && stages.approved !== undefined ? stages.approved : stages.reviewed}
+                                </span>
                             </div>
                         </div>
                     ) : (

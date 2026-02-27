@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import Papa from 'papaparse';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
@@ -69,9 +72,8 @@ export async function GET(request: Request) {
         if (fs.existsSync(filePath)) {
             try {
                 const content = fs.readFileSync(filePath, 'utf-8');
-                const lines = content.split('\n').filter(l => l.trim().length > 0);
-                const approvedCount = Math.max(0, lines.length - 1); // Subtract header
-                return { isCompleted: true, approvedCount };
+                const parsed = Papa.parse(content, { header: true, skipEmptyLines: true });
+                return { isCompleted: true, approvedCount: parsed.data ? parsed.data.length : 0 };
             } catch (e) {
                 return { isCompleted: true, approvedCount: 0 };
             }
