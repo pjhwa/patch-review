@@ -95,7 +95,7 @@ export default function ProductDetailPage() {
         }
     };
 
-    const toggleExclusion = (issueId: string, checked: boolean) => {
+    const toggleExclusion = async (issueId: string, checked: boolean) => {
         setLocalExclusions(prev => ({
             ...prev,
             [issueId]: {
@@ -105,6 +105,19 @@ export default function ProductDetailPage() {
                 reason: prev[issueId]?.reason || ''
             }
         }));
+
+        if (!checked) {
+            try {
+                const res = await fetch(`/api/pipeline/feedback?issueId=${encodeURIComponent(issueId)}`, {
+                    method: 'DELETE'
+                });
+                if (res.ok) {
+                    setFeedbacks(prev => prev.filter(f => f.issueId !== issueId));
+                }
+            } catch (e) {
+                console.error("Failed to remove feedback", e);
+            }
+        }
     };
 
     const updateExclusionData = (issueId: string, data: { category?: string, detail?: string }) => {
@@ -426,8 +439,8 @@ export default function ProductDetailPage() {
                                         }}
                                         disabled={isFinalizing || isDone}
                                         className={`font-semibold py-3 px-8 rounded-xl transition-all flex items-center gap-3 ${isDone
-                                                ? "bg-emerald-600/30 text-emerald-300 border border-emerald-500/50 cursor-not-allowed shadow-[0_0_15px_rgba(16,185,129,0.2)]"
-                                                : "bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(59,130,246,0.5)] disabled:opacity-50 disabled:shadow-none"
+                                            ? "bg-emerald-600/30 text-emerald-300 border border-emerald-500/50 cursor-not-allowed shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+                                            : "bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(59,130,246,0.5)] disabled:opacity-50 disabled:shadow-none"
                                             }`}
                                     >
                                         {isFinalizing ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
