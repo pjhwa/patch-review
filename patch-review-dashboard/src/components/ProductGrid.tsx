@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { PremiumCard } from "@/components/PremiumCard";
 
-export function ProductGrid({ categoryId, products }: { categoryId: string, products: any[] }) {
+export function ProductGrid({ categoryId, products, dict }: { categoryId: string, products: any[], dict: any }) {
     const [isRunning, setIsRunning] = useState(false);
     const [resultMsg, setResultMsg] = useState("");
     const [logTail, setLogTail] = useState("");
@@ -60,7 +60,7 @@ export function ProductGrid({ categoryId, products }: { categoryId: string, prod
 
     const handleRunSharedPipeline = async (productId: string, isRetry: boolean = false) => {
         setIsRunning(true);
-        setResultMsg(isRetry ? "Initiating Retry..." : "Initiating pipeline...");
+        setResultMsg(isRetry ? dict.dashboard.productGrid.initiatingRetry : dict.dashboard.productGrid.initiatingPipeline);
 
         try {
             const res = await fetch('/api/pipeline/execute', {
@@ -96,7 +96,7 @@ export function ProductGrid({ categoryId, products }: { categoryId: string, prod
                 a.click();
                 window.URL.revokeObjectURL(url);
             } else {
-                alert("No finalized CSV available to download yet. Please ensure the review is marked as complete.");
+                alert("No finalized CSV available to download yet. Please ensure the review is marked as complete."); // Kept as alert for simplicity, though could also be translated
             }
         } catch (e) {
             console.error("Failed to download CSV", e);
@@ -114,7 +114,7 @@ export function ProductGrid({ categoryId, products }: { categoryId: string, prod
                         key={prod.id}
                         title={prod.name}
                         stages={prod.stages}
-                        desc="Pending patches to review"
+                        desc={dict.dashboard.productGrid.pendingPatches}
                         active={prod.active}
                         href={`/category/${categoryId}/${prod.id}`}
                         categoryId={categoryId}
@@ -129,9 +129,9 @@ export function ProductGrid({ categoryId, products }: { categoryId: string, prod
                 <div className="p-4 border border-emerald-500/20 bg-emerald-500/10 rounded-lg">
                     <div className="flex justify-between items-center">
                         <div className="flex-col">
-                            <p className="text-sm text-emerald-400 font-medium">{resultMsg || "Pipeline is currently idle."}</p>
+                            <p className="text-sm text-emerald-400 font-medium">{resultMsg || dict.dashboard.productGrid.idlePipeline}</p>
                             {!isRunning && lastCompletedAt && (
-                                <p className="text-xs text-emerald-500/80 mt-1">Last Run: {new Date(lastCompletedAt).toLocaleString()}</p>
+                                <p className="text-xs text-emerald-500/80 mt-1">{dict.dashboard.productGrid.lastRun}{new Date(lastCompletedAt).toLocaleString()}</p>
                             )}
                         </div>
                         {!isRunning && failureCount > 0 && (
@@ -139,7 +139,7 @@ export function ProductGrid({ categoryId, products }: { categoryId: string, prod
                                 onClick={() => requestRunPipeline('ubuntu', true)}
                                 className="px-3 py-1 bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/40 text-emerald-100 text-xs rounded transition-colors"
                             >
-                                Retry Failed Patches ({failureCount})
+                                {dict.dashboard.productGrid.retryFailed} ({failureCount})
                             </button>
                         )}
                         {!isRunning && lastCompletedAt && (
@@ -148,7 +148,7 @@ export function ProductGrid({ categoryId, products }: { categoryId: string, prod
                                 disabled={isDownloading}
                                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition-colors ml-4 shadow-[0_0_15px_rgba(59,130,246,0.5)] disabled:opacity-50 flex items-center gap-2 border border-blue-500"
                             >
-                                {isDownloading ? "Generating..." : "Download Final CSV Document"}
+                                {isDownloading ? dict.dashboard.productGrid.generating : dict.dashboard.productGrid.downloadCsvBtn}
                             </button>
                         )}
                     </div>
@@ -164,23 +164,23 @@ export function ProductGrid({ categoryId, products }: { categoryId: string, prod
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
                     <div className="bg-[#111] border border-white/10 rounded-xl p-6 max-w-md w-full shadow-2xl">
                         <h3 className="text-lg font-medium text-white mb-4">
-                            {confirmDialog.isRetry ? "Retry Failed Patches" : "Start Data Collection"}
+                            {confirmDialog.isRetry ? dict.dashboard.productGrid.retryTitle : dict.dashboard.productGrid.startCollectionTitle}
                         </h3>
 
                         <div className="text-sm text-white/60 space-y-4 mb-6">
                             {!confirmDialog.isRetry && lastCompletedAt && (
                                 <div className="p-3 bg-red-500/10 border border-red-500/20 rounded text-red-400">
-                                    <strong className="block mb-1">Recent Execution Detected!</strong>
-                                    The pipeline was last successfully run at: {new Date(lastCompletedAt).toLocaleString()}. Are you sure you want to run it again so soon?
+                                    <strong className="block mb-1">{dict.dashboard.productGrid.recentExecutionDetected}</strong>
+                                    {dict.dashboard.productGrid.recentExecutionDesc}{new Date(lastCompletedAt).toLocaleString()}. {dict.dashboard.productGrid.recentExecutionAsk}
                                 </div>
                             )}
 
                             {!confirmDialog.isRetry ? (
-                                <p>This will archive all existing batch data, JSON outputs, and CSV reports into a timestamped folder, and start a completely fresh collection. Your UI counts will temporarily be reset to 0.</p>
+                                <p>{dict.dashboard.productGrid.freshStartDesc}</p>
                             ) : (
-                                <p>This will preserve existing data and only attempt to collect patches that failed during the last run.</p>
+                                <p>{dict.dashboard.productGrid.retryDesc}</p>
                             )}
-                            <p className="font-medium text-white/80">Do you wish to proceed?</p>
+                            <p className="font-medium text-white/80">{dict.dashboard.productGrid.proceedAsk}</p>
                         </div>
 
                         <div className="flex justify-end gap-3">
@@ -188,13 +188,13 @@ export function ProductGrid({ categoryId, products }: { categoryId: string, prod
                                 onClick={() => setConfirmDialog({ isOpen: false, productId: null, isRetry: false })}
                                 className="px-4 py-2 rounded bg-white/5 hover:bg-white/10 text-white transition-colors text-sm"
                             >
-                                Cancel
+                                {dict.dashboard.productGrid.cancelBtn}
                             </button>
                             <button
                                 onClick={confirmRun}
                                 className="px-4 py-2 rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30 transition-colors text-sm font-medium"
                             >
-                                {confirmDialog.isRetry ? "Yes, Retry" : "Yes, Start Fresh"}
+                                {confirmDialog.isRetry ? dict.dashboard.productGrid.yesRetryBtn : dict.dashboard.productGrid.yesStartFreshBtn}
                             </button>
                         </div>
                     </div>
