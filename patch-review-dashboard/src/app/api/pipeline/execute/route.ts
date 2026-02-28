@@ -49,7 +49,16 @@ export async function POST(request: Request) {
                 const preprocessedFile = path.join(linuxSkillDir, 'patches_for_llm_review.json');
                 const finalReportFile = path.join(linuxSkillDir, 'patch_review_final_report.csv');
 
-                if (fs.existsSync(batchDataDir) || fs.existsSync(preprocessedFile) || fs.existsSync(finalReportFile)) {
+                const approvedFiles = ['redhat', 'oracle', 'ubuntu'].map(prod =>
+                    path.join(linuxSkillDir, `final_approved_patches_${prod}.csv`)
+                );
+
+                const shouldArchive = fs.existsSync(batchDataDir) ||
+                    fs.existsSync(preprocessedFile) ||
+                    fs.existsSync(finalReportFile) ||
+                    approvedFiles.some(f => fs.existsSync(f));
+
+                if (shouldArchive) {
                     // Create archive dir based on current timestamp
                     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
                     const archiveDir = path.join(linuxSkillDir, 'archive', timestamp);
@@ -67,6 +76,12 @@ export async function POST(request: Request) {
                     if (fs.existsSync(finalReportFile)) {
                         fs.renameSync(finalReportFile, path.join(archiveDir, 'patch_review_final_report.csv'));
                     }
+                    ['redhat', 'oracle', 'ubuntu'].forEach(prod => {
+                        const approvedFile = path.join(linuxSkillDir, `final_approved_patches_${prod}.csv`);
+                        if (fs.existsSync(approvedFile)) {
+                            fs.renameSync(approvedFile, path.join(archiveDir, `final_approved_patches_${prod}.csv`));
+                        }
+                    });
                 }
             } catch (e) {
                 console.error("Warning: Failed to archive old data", e);

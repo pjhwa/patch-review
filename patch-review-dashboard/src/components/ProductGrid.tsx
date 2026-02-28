@@ -122,6 +122,7 @@ export function ProductGrid({ categoryId, products, dict }: { categoryId: string
                         isRunning={isRunning && prod.active}
                         isReviewCompleted={prod.isReviewCompleted}
                         onRunPipeline={() => requestRunPipeline(prod.id, false)}
+                        dict={dict}
                     />
                 ))}
             </div>

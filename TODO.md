@@ -12,6 +12,7 @@ Mission Control Dashboard에서 영감을 받은 **Patch Review Board** 통합 �
 - [x] 담당자가 리뷰 완료 후 **[Mark Product Review as DONE]** 버튼 클릭 시 `api/pipeline/finalize` 백엔드 로직을 통해 최종 `final_approved_patches_[prod].csv` 파일이 톰캣 서버에 안전하게 생성/저장.
 - [x] 카테고리 상세 페이지 우측 상단에 **[Download Final CSV Document]** 추가.
 - [x] **BugFix**: Finalize 로직에서 빈 CSV(헤더만 존재)가 생성되던 이슈 해결. (기존 JSON 대신 최종 AI 결과물인 `patch_review_final_report.csv` 원본을 직접 파싱하게 PapaParse 플러그인 도입 및 로직 교체)
+- [x] **New Feature**: 전역 레이아웃 및 각 기능별 UI 컴포넌트에 대한 완전한 다국어(KOR/ENG) i18n 지원 구현 및 쿠키 기반의 상태 저장 연동 완료.
 
 ## 1. 계획 및 분석 단계 (Planning & Analysis)
 - [x] 요구사항 분석: 각 카테고리/제품별 패치 계층 구조 파악
@@ -41,6 +42,7 @@ Mission Control Dashboard에서 영감을 받은 **Patch Review Board** 통합 �
 - [x] AI 리뷰 결과 테이블 뷰 개발: 담당자가 확인해야 할 최종 패치 목록
 - [x] 세부 패치 모달/페이지 개발: AI가 작성한 치명적인 버그 수정 내역 설명 확인 기능
 - [x] CSV 출력 기능: 최종 검토 대상 패치 목록을 CSV 파일로 다운로드하는 기능 개발
+- [x] 과거 기록(Archive) 화면 개발: 파이프라인 재실행 시 백업된 이전 히스토리 내역 조회 및 CSV 다운로드 연동 완료
 
 ## 6. 테스트 및 검증 (Testing & Validation)
 - [x] 스태프 엔지니어 수준의 코드 리뷰 및 구조적 우아함 검토

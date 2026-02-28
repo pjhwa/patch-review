@@ -60,6 +60,15 @@ const dictionaries = {
                 yesRetryBtn: "Yes, Retry",
                 yesStartFreshBtn: "Yes, Start Fresh",
             },
+            premiumCard: {
+                collected: "Collected",
+                preprocessed: "Preprocessed",
+                reviewed: "Reviewed",
+                approved: "Approved",
+                noData: "No data available",
+                runPipeline: "Run Pipeline",
+                reviewCompleted: "Review Completed"
+            },
             productDetail: {
                 subtitle: "Detailed Patch Review Analysis",
                 fetching: "Fetching pipeline stages...",
@@ -78,7 +87,17 @@ const dictionaries = {
                 aiTranslation: "AI Translation Snippet",
                 noData: "No completed AI review data found for this product.",
                 noDataSub: "Please run the pipeline or ensure patch_review_final_report.csv exists.",
-                normal: "Normal"
+                normal: "Normal",
+                update: "Update",
+                patchElement: "Patch Element #",
+                unknownIssuePrefix: "Unknown-Issue-",
+                criticalityMap: {
+                    critical: "Critical",
+                    high: "High",
+                    medium: "Medium",
+                    low: "Low",
+                    none: "None"
+                }
             },
             archivePage: {
                 title: "Archives",
@@ -90,6 +109,31 @@ const dictionaries = {
                 recordLabel: " Record",
                 downloadCsv: "Download Filtered CSV",
                 noData: "No Data Available"
+            },
+            feedback: {
+                reviewFinalized: "Review Finalized Successfully",
+                reviewFinalizedDesc: "The approved patches have been exported to the master CSV. You can now download it from the main dashboard.",
+                exclude: "Exclude from Future Reviews",
+                aiContextTitle: "AI Learning Context: Detailed Exclusion Form",
+                categoryLabel: "1. Primary Reason Category",
+                categoryPlaceholder: "Select a category...",
+                detailLabel: "2. Specific Details for the AI",
+                detailPlaceholder: "e.g., We use a separate WAF to block this port, so patching is not required.",
+                submitFeedback: "Submit Feedback",
+                feedbackSaved: "Feedback Saved",
+                contextMatters: "Detailed Context Matters:",
+                contextDesc: "The category and details you submit are directly injected into the AI's training prompt. Clear, accurate reasoning will significantly improve the AI's ability to autonomously filter similar out-of-scope patches in future pipelines.",
+                markAsDone: "Mark Product Review as DONE",
+                reviewCompleted: "Review Completed",
+                finalizing: "Finalizing Review...",
+                aiRecommended: "AI Recommended",
+                options: {
+                    envMismatch: "Environment Mismatch (e.g., Module not used)",
+                    compensatingControl: "Compensating Control Exists",
+                    riskAccepted: "Risk Assessed & Accepted",
+                    dependencyConflict: "Dependency Conflict (Breaks App)",
+                    other: "Other"
+                }
             }
         }
     },
@@ -147,6 +191,15 @@ const dictionaries = {
                 yesRetryBtn: "예, 재실행합니다",
                 yesStartFreshBtn: "예, 완전히 새로 고칩니다",
             },
+            premiumCard: {
+                collected: "수집 완료",
+                preprocessed: "전처리 완료",
+                reviewed: "AI 리뷰완료",
+                approved: "최종 승인됨",
+                noData: "테스트 데이터가 없습니다",
+                runPipeline: "파이프라인 실행",
+                reviewCompleted: "마스터 리뷰 마감됨"
+            },
             productDetail: {
                 subtitle: "상세 패치 리뷰 분석 결과",
                 fetching: "파이프라인 단계별 데이터 조회 중...",
@@ -165,7 +218,17 @@ const dictionaries = {
                 aiTranslation: "AI 자동 번역 요약본",
                 noData: "이 제품에 대한 완료된 AI 리뷰 데이터를 찾을 수 없습니다.",
                 noDataSub: "파이프라인을 실행하거나 patch_review_final_report.csv 파일이 존재하는지 확인해 주세요.",
-                normal: "일반"
+                normal: "일반",
+                update: "업데이트",
+                patchElement: "패치 항목 #",
+                unknownIssuePrefix: "미확인-이슈-",
+                criticalityMap: {
+                    critical: "긴급 (Critical)",
+                    high: "높음 (High)",
+                    medium: "중간 (Medium)",
+                    low: "낮음 (Low)",
+                    none: "없음 (None)"
+                }
             },
             archivePage: {
                 title: "아카이브 내역",
@@ -177,6 +240,31 @@ const dictionaries = {
                 recordLabel: " 아카이브 기록",
                 downloadCsv: "필터링된 CSV 다운로드",
                 noData: "데이터 없음"
+            },
+            feedback: {
+                reviewFinalized: "리뷰 및 최종 승인 완료",
+                reviewFinalizedDesc: "승인된 패치 항목들이 마스터 CSV에 내보내졌습니다. 메인 대시보드 화면에서 다운로드할 수 있습니다.",
+                exclude: "향후 검토 대상에서 제외",
+                aiContextTitle: "AI 학습 컨텍스트: 상세 제외 사유 양식",
+                categoryLabel: "1. 주요 제외 사유 카테고리",
+                categoryPlaceholder: "카테고리를 선택하세요...",
+                detailLabel: "2. AI 학습용 세부 의견",
+                detailPlaceholder: "예: 해당 포트를 방화벽단에서 차단 중이므로 패치가 필요하지 않습니다.",
+                submitFeedback: "학습 의견 제출",
+                feedbackSaved: "제출 완료",
+                contextMatters: "상세 사유 작성의 중요성:",
+                contextDesc: "담당자가 제출한 카테고리와 세부 의견은 향후 AI의 프롬프트에 직접 학습/주입됩니다. 명확하고 구체적인 사유를 작성할수록, 향후 AI 엔진이 유사한 불필요 패치를 자율적으로 식별해 권고 목록에서 사전 제외할 수 있습니다.",
+                markAsDone: "이 제품의 리뷰를 완료(DONE) 상태로 마감하기",
+                reviewCompleted: "리뷰 마감 완료됨",
+                finalizing: "AI 리뷰 마감 내용 서버로 전송 중...",
+                aiRecommended: "AI 추천 항목",
+                options: {
+                    envMismatch: "환경 불일치 (예: 사용하지 않는 모듈)",
+                    compensatingControl: "대체 통제 수단 존재 (보안 적용됨)",
+                    riskAccepted: "위험 평가 및 수용됨",
+                    dependencyConflict: "의존성 충돌 (서비스 장애 우려)",
+                    other: "기타 사유"
+                }
             }
         }
     }
