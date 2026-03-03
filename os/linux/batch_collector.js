@@ -1,6 +1,7 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 
 // --- ROBUST DEBUGGING (Anti-Hang) ---
 process.on('uncaughtException', (err) => {
@@ -150,81 +151,126 @@ function saveAdvisory(id, data) {
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
-// --- RED HAT SCRAPER (Unchanged) ---
-async function scrapeRedHat(browser) {
-    console.log('\n[REDHAT] Starting Collector...');
-    const page = await browser.newPage();
-    const allAdvisories = [];
-    let shouldContinue = true;
-
-    try {
-        const baseUrl = 'https://access.redhat.com/errata-search/?q=&sort=portal_publication_date%20desc&rows=100&portal_errata_type=Security%20Advisory&portal_product_filter=Red%20Hat%20Enterprise%20Linux';
-
-        for (let i = 1; i <= MAX_REDHAT_PAGES && shouldContinue; i++) {
-            const url = `${baseUrl}&p=${i}`;
-            console.log(`[REDHAT] Fetching List Page ${i}/${MAX_REDHAT_PAGES}: ${url}`);
-
-            try {
-                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-                try {
-                    await page.waitForSelector('.search-result-table tbody tr', { timeout: 15000 });
-                } catch (e) {
-                    await page.waitForTimeout(5000);
-                }
-
-                const pageAdvisories = await page.evaluate(() => {
-                    let rows = Array.from(document.querySelectorAll('.search-result-table tbody tr'));
-                    if (rows.length === 0) {
-                        throw new Error('Table rows did not render in time. Forcing retry or skip.');
-                    }
-                    return rows.map(row => {
-                        const idLink = row.querySelector('td a') || row.querySelector('th a');
-                        if (!idLink) return null;
-                        const cells = row.querySelectorAll('td');
-                        const dateText = cells[cells.length - 1]?.innerText.trim() || '';
-                        return {
-                            id: idLink.innerText.trim(),
-                            url: idLink.href,
-                            synopsis: cells[0]?.innerText.trim() || '',
-                            dateStr: dateText
-                        };
-                    }).filter(x => x && x.id.includes('RHSA'));
-                });
-
-                if (pageAdvisories.length > 0) {
-                    const validDates = pageAdvisories.filter(a => a.dateStr).map(a => parseDate(a.dateStr));
-                    if (validDates.length > 0) {
-                        const oldestDate = new Date(Math.min(...validDates));
-                        if (oldestDate < TARGET_START_DATE) {
-                            console.log(`[REDHAT] Page ${i}: Reached advisories before ${TARGET_START_DATE.toISOString().split('T')[0]}. Stopping pagination.`);
-                            const filtered = pageAdvisories.filter(adv => !adv.dateStr || parseDate(adv.dateStr) >= TARGET_START_DATE);
-                            allAdvisories.push(...filtered);
-                            shouldContinue = false;
-                            break;
-                        }
-                    }
-                }
-
-                allAdvisories.push(...pageAdvisories);
-
-            } catch (err) {
-                console.error(`[REDHAT] Error page ${i}: ${err.message}. Stopping pagination.`);
-                shouldContinue = false;
+// --- RED HAT SCRAPER (CSAF API — no browser rendering needed) ---
+function httpsGet(url) {
+    return new Promise((resolve, reject) => {
+        const req = https.get(url, { timeout: 30000 }, res => {
+            // Follow redirects
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                return httpsGet(res.headers.location).then(resolve).catch(reject);
             }
-        }
-
-        console.log(`[REDHAT] Found ${allAdvisories.length} candidates across pages.`);
-
-        await processInBatches(browser, allAdvisories, 'Red Hat', redhatWorker);
-
-    } catch (e) {
-        console.error('[REDHAT] Critical:', e);
-    } finally {
-        try { await page.close(); } catch (_) { }
-    }
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => resolve({ status: res.statusCode, body: data }));
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('HTTPS timeout')); });
+    });
 }
 
-// --- ORACLE MAILING LIST SCRAPER (Unchanged) ---
+async function scrapeRedHat(browser) {
+    console.log('\n[REDHAT] Starting Collector (CSAF API)...');
+    const CSAF_BASE = 'https://security.access.redhat.com/data/csaf/v2/advisories';
+    const CHANGES_URL = `${CSAF_BASE}/changes.csv`;
+
+    let csvText = '';
+    try {
+        const r = await httpsGet(CHANGES_URL);
+        if (r.status !== 200) throw new Error(`HTTP ${r.status}`);
+        csvText = r.body;
+    } catch (e) {
+        console.error(`[REDHAT] Failed to fetch changes.csv: ${e.message}`);
+        return;
+    }
+
+    // Parse CSV: "2026/rhsa-2026_XXXX.json","2026-03-03T..."
+    const lines = csvText.trim().split('\n');
+    const candidates = [];
+    for (const line of lines) {
+        const m = line.match(/"([^"]+rhsa[^"]+\.json)","([^"]+)"/);
+        if (!m) continue;
+        const [, filePath, timestamp] = m;
+        const pubDate = new Date(timestamp);
+        if (pubDate < TARGET_START_DATE || pubDate >= TARGET_END_DATE) continue;
+        const idMatch = filePath.match(/rhsa-(\d+)_(\d+)\.json/);
+        if (!idMatch) continue;
+
+        // Skip regenerated old advisories using the year from the ID
+        const advYear = parseInt(idMatch[1]);
+        if (advYear < TARGET_START_DATE.getFullYear() - 1) continue; // Allow -1 year buffer for overlap
+
+        const id = `RHSA-${idMatch[1]}:${idMatch[2]}`;
+        const safeId = id.replace(/[^a-zA-Z0-9-_]/g, '_');
+        if (fs.existsSync(path.join(OUTPUT_DIR, `${safeId}.json`))) continue;
+        candidates.push({ id, filePath, pubDate, safeId });
+    }
+
+    console.log(`[REDHAT] Found ${candidates.length} new RHSA advisories in window (${TARGET_START_DATE.toISOString().split('T')[0]} ~ ${TARGET_END_DATE.toISOString().split('T')[0]}).`);
+
+    let saved = 0, skipped = 0;
+    for (let i = 0; i < candidates.length; i += MAX_CONCURRENCY) {
+        const batch = candidates.slice(i, i + MAX_CONCURRENCY);
+        await Promise.all(batch.map(async ({ id, filePath, pubDate, safeId }) => {
+            const url = `${CSAF_BASE}/${filePath}`;
+            try {
+                const r = await httpsGet(url);
+                if (r.status !== 200) { skipped++; return; }
+                const csaf = JSON.parse(r.body);
+
+                const doc = csaf.document || {};
+                const tracking = doc.tracking || {};
+                const releaseDateStr = tracking.initial_release_date || tracking.current_release_date || pubDate.toISOString();
+                const actualReleaseDate = new Date(releaseDateStr);
+
+                // Skip if actual release date is older than our target
+                if (actualReleaseDate < TARGET_START_DATE) {
+                    skipped++;
+                    return;
+                }
+
+                const severity = doc.aggregate_severity?.text || '';
+                const title = doc.title || id;
+                const notes = doc.notes || [];
+                const overview = notes.find(n => n.category === 'summary')?.text || '';
+                const description = notes.find(n => n.category === 'description')?.text || overview;
+                const cves = (csaf.vulnerabilities || []).map(v => v.cve).filter(Boolean);
+                const ref_url = `https://access.redhat.com/errata/${id}`;
+
+                // Extract product names from product_tree branches
+                const affected_products = [];
+                function extractProducts(nodes) {
+                    for (const node of (nodes || [])) {
+                        if (node.category === 'product_name' && node.name) affected_products.push(node.name);
+                        if (node.branches) extractProducts(node.branches);
+                    }
+                }
+                extractProducts(csaf.product_tree?.branches);
+
+                const full_text = [title, overview, description, cves.join(' ')].join('\n').slice(0, 6000);
+
+                saveAdvisory(safeId, {
+                    id, vendor: 'Red Hat',
+                    url: ref_url,
+                    pubDate: actualReleaseDate.toISOString(),
+                    dateStr: actualReleaseDate.toISOString().split('T')[0],
+                    severity, title, overview, description,
+                    affected_products, cves, packages: [], fixes: '',
+                    full_text
+                });
+                saved++;
+                logDebug(`[PROCESS] Success ${id}`);
+            } catch (e) {
+                skipped++;
+                logDebug(`[PROCESS FAIL] ${id}: ${e.message}`);
+            }
+        }));
+        process.stdout.write(`\r[REDHAT PROGRESS] ${Math.min(i + MAX_CONCURRENCY, candidates.length)}/${candidates.length}`);
+    }
+    console.log(`\n[REDHAT] Saved ${saved}, Skipped/Failed ${skipped}.`);
+    console.log(`[BATCH] Red Hat: Found ${candidates.length + saved} candidates. Skipped ${skipped} (already exist or failed). Processed ${saved} new items.`);
+}
+
+// --- ORACLE MAILING LIST SCRAPER ---
 async function scrapeOracleMailingList(browser) {
     console.log('\n[ORACLE] Starting Collector (Mailing List Archive)...');
     const page = await browser.newPage();
@@ -249,18 +295,16 @@ async function scrapeOracleMailingList(browser) {
 
                     return links.map(link => {
                         const text = link.innerText.trim();
-                        if (!text.toLowerCase().includes('unbreakable enterprise kernel') &&
-                            !text.toLowerCase().includes('oracle linux')) {
-                            // Only include UEK or Oracle Linux specific updates
-                            // return null; (We will let later stage filter it)
-                        }
+                        const href = link.href ? link.href.trim() : '';
 
+                        // Only collect items with a valid ELSA/ELBA advisory ID
                         const idMatch = text.match(/EL[SB]A-\d{4}-\d+/);
-                        const id = idMatch ? idMatch[0] : `ELSA-UNKNOWN-${Math.random().toString(36).substr(2, 5)}`;
+                        if (!idMatch) return null;  // Skip non-advisory posts (bug reports etc.)
+                        if (!href || !href.startsWith('http')) return null; // Skip empty URLs
 
                         return {
-                            id: id,
-                            url: link.href,
+                            id: idMatch[0],
+                            url: href,
                             synopsis: text,
                             dateStr: monthStr,
                             type: 'Mailing List Announcement'
@@ -456,109 +500,17 @@ async function processInBatches(browser, allItems, vendorTitle, asyncWorker) {
 }
 
 // --- WORKER DEFs ---
+// redhatWorker removed — Red Hat data is now fetched directly via CSAF API in scrapeRedHat()
+// keeping a no-op stub for any legacy references
 const redhatWorker = async (ctxPage, adv) => {
-    await ctxPage.goto(adv.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    const details = await ctxPage.evaluate(() => {
-        const main = document.querySelector('#main-content') || document.body;
-        const clones = main.cloneNode(true);
-        clones.querySelectorAll('nav, footer, script, style, .hide').forEach(n => n.remove());
-
-        // Recursive formatter to respect block elements and nesting
-        function extractTextWithNewlines(node) {
-            if (node.nodeType === 3) { // Text node
-                return node.nodeValue || '';
-            }
-            if (node.nodeType !== 1) return ''; // Skip non-element
-
-            let text = '';
-            const isBlock = /^(DIV|P|H[1-6]|LI|TR|UL|OL|TABLE|BLOCKQUOTE|PRE)$/i.test(node.tagName);
-
-            for (let child of node.childNodes) {
-                text += extractTextWithNewlines(child);
-            }
-
-            if (isBlock) {
-                text = '\n' + text + '\n';
-            }
-            return text;
-        }
-
-        let text = extractTextWithNewlines(clones)
-            .replace(/[ \t]+/g, ' ')       // collapse multiple spaces/tabs into one
-            .replace(/ \n /g, '\n')       // clean spaces around newlines
-            .replace(/\n{3,}/g, '\n\n')   // collapse 3+ newlines into maximum 2
-            .trim();
-
-        const detailsObj = {
-            severity: '',
-            overview: '',
-            description: '',
-            affected_products: [],
-            packages: [],
-            cves: [],
-            fixes: '',
-            notes: ''
-        };
-
-        const getSection = (header, nextHeaders) => {
-            const regex = new RegExp(`(?:^|\\n)${header}\\s*\\n(.*?)(?:\\n(?:${nextHeaders.join('|')})\\s*\\n|$)`, 's');
-            const match = text.match(regex);
-            return match ? match[1].trim() : '';
-        };
-
-        const rhHeaders = ['Synopsis', 'Topic', 'Type/Severity', 'Description', 'Solution', 'Affected Products', 'Fixes', 'CVEs', 'References', 'Updated Packages'];
-
-        detailsObj.overview = getSection('Topic', rhHeaders);
-        detailsObj.description = getSection('Description', rhHeaders);
-        detailsObj.fixes = getSection('Fixes', rhHeaders);
-
-        // Severity Parsing
-        const typeSeverity = getSection('Type/Severity', rhHeaders);
-        if (typeSeverity) {
-            const sevMatch = typeSeverity.match(/(Critical|Important|Moderate|Low)/i);
-            if (sevMatch) detailsObj.severity = sevMatch[1];
-        } else {
-            // Fallback to Synopsis if Type/Severity header is missing
-            const synopsis = getSection('Synopsis', rhHeaders);
-            if (synopsis) {
-                const sevMatch = synopsis.match(/(Critical|Important|Moderate|Low):/i);
-                if (sevMatch) detailsObj.severity = sevMatch[1];
-            }
-        }
-
-        // Affected Products Parsing
-        const affectedText = getSection('Affected Products', rhHeaders);
-        if (affectedText) {
-            detailsObj.affected_products = affectedText.split('\n')
-                .map(l => l.trim().replace(/^-\s*/, '')) // remove list hyphens if any
-                .filter(l => l.length > 0);
-        }
-
-        const cvesText = getSection('CVEs', rhHeaders);
-        if (cvesText) {
-            detailsObj.cves = [...new Set(cvesText.match(/CVE-\d{4}-\d+/g) || [])];
-        } else {
-            const allCves = text.match(/CVE-\d{4}-\d+/g);
-            if (allCves) detailsObj.cves = [...new Set(allCves)];
-        }
-
-        const pkgsText = getSection('Updated Packages', rhHeaders);
-        if (pkgsText) {
-            detailsObj.packages = pkgsText.split('\n')
-                .filter(l => l.includes('.rpm'))
-                .map(l => l.trim().split(' ')[0]);
-        }
-
-        return {
-            ...detailsObj,
-            full_text: text.slice(0, 6000),
-            title: document.title
-        };
-    });
-    saveAdvisory(adv.id, { ...adv, ...details, vendor: 'Red Hat' });
+    console.warn('[REDHAT] redhatWorker called unexpectedly — should use CSAF API path');
 };
 
 const oracleWorker = async (ctxPage, adv) => {
+    if (!adv.url || !adv.url.startsWith('http')) {
+        logDebug(`[SKIP] Oracle ${adv.id}: empty or invalid URL`);
+        return;
+    }
     await ctxPage.goto(adv.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     const details = await ctxPage.evaluate(() => {
         const pre = document.querySelector('pre');
@@ -575,32 +527,43 @@ const oracleWorker = async (ctxPage, adv) => {
         }
 
         let text = extractTextWithNewlines(document.body)
-            .replace(/[ \t]+/g, ' ')
+            .replace(/[\t]+/g, ' ')
             .replace(/ \n /g, '\n')
             .replace(/\n{3,}/g, '\n\n')
             .trim();
 
         // Structured Extraction from Oracle's mailing text
         const detailsObj = {
+            severity: '',
             overview: '',
             description: '',
+            affected_products: [],
             packages: [],
             cves: [],
             fixes: '',
             notes: ''
         };
 
+        // Severity: Oracle uses "Security Impact: Critical/Important/Moderate/Low"
+        const sevMatch = text.match(/Security Impact:\s*(Critical|Important|Moderate|Low)/i)
+            || text.match(/Type:\s*Security.*?(Critical|Important|Moderate|Low)/i);
+        if (sevMatch) detailsObj.severity = sevMatch[1];
+
+        // Overview/synopsis from the email subject line: first line like "EL[SB]A-XXXX:XXXX ..."
+        const firstLine = text.split('\n').find(l => l.trim().match(/EL[SB]A-\d{4}/));
+        if (firstLine) detailsObj.overview = firstLine.trim();
+
         // Match CVEs
         const cveMatches = text.match(/CVE-\d{4}-\d+/g);
-        if (cveMatches) {
-            detailsObj.cves = [...new Set(cveMatches)];
-        }
+        if (cveMatches) detailsObj.cves = [...new Set(cveMatches)];
 
         // Extract Description of changes
         const descMatch = text.match(/Description of changes:(.*?)($|Related CVEs:|Oracle Linux Security Advisory)/s);
-        if (descMatch) {
-            detailsObj.description = descMatch[1].trim();
-        }
+        if (descMatch) detailsObj.description = descMatch[1].trim();
+
+        // Affected Products: detect OL version strings
+        const olMatches = text.match(/Oracle Linux \d+/g);
+        if (olMatches) detailsObj.affected_products = [...new Set(olMatches)];
 
         // Extract RPMs
         const rpmsMatch = text.match(/x86_64:(.*?)SRPMS:/s) || text.match(/aarch64:(.*?)SRPMS:/s);
@@ -869,5 +832,19 @@ const ubuntuWorker = async (ctxPage, adv) => {
     }
 
     saveFailureReport();
+
+    // --- CLEANUP: Remove any ELSA-UNKNOWN-* temp files left from previous runs ---
+    try {
+        const tempFiles = fs.readdirSync(OUTPUT_DIR).filter(f => f.startsWith('ELSA-UNKNOWN-') && f.endsWith('.json'));
+        for (const f of tempFiles) {
+            fs.unlinkSync(path.join(OUTPUT_DIR, f));
+        }
+        if (tempFiles.length > 0) {
+            console.log(`[CLEANUP] Removed ${tempFiles.length} ELSA-UNKNOWN temp file(s).`);
+        }
+    } catch (e) {
+        console.warn(`[CLEANUP] Could not clean ELSA-UNKNOWN files: ${e.message}`);
+    }
+
     console.log('=== COLLECTION COMPLETE ===');
 })();
