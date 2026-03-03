@@ -26,16 +26,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ stag
             patches = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
             message = "These are the pre-processed (filtered) patches before AI Review.";
         } else if (stageId === 'reviewed') {
-            const filePath = path.join(linuxSkillDir, 'patch_review_final_report.csv');
+            const filePath = path.join(linuxSkillDir, 'patch_review_ai_report.json');
             if (!fs.existsSync(filePath)) {
                 return NextResponse.json({ error: "No reviewed data available yet." }, { status: 404 });
             }
-            const csvData = fs.readFileSync(filePath, 'utf-8');
-            const result = Papa.parse(csvData, {
-                header: true,
-                skipEmptyLines: true,
-            });
-            patches = result.data;
+            patches = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
             message = "These are the final patches reviewed by the AI.";
         }
 

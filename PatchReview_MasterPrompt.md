@@ -37,8 +37,23 @@
 
 **Step 2.3: AI Review Agent Instruction (`SKILL.md`)**
 - OpenClaw LLM이 전처리된 JSON을 읽고 심층 분석을 수행하도록 만드는 메인 시스템 프롬프트(마크다운 형태)를 작성해야 합니다.
-- Tier-3 시스템 관리자 페르소나를 부여하십시오. OS별 의존성과 장애 가능성을 판단(Impact Analysis)하도록 지시해야 합니다.
-- 분석을 모두 마치면, 결과를 파싱하기 쉬운 최종 형태인 `patch_review_final_report.csv`에 `[Issue ID, Component, Criticality, Patch Description, 한글 설명]` 등 규격화된 컬럼으로 출력하도록 강제하십시오.
+- Tier-3 시스템 관리자 페르소나를 부여하십시오. OS별 의존성과### OUTPUT FORMAT EXPECTATION (JSON)
+The AI Review step **MUST ONLY** produce a single, valid JSON array containing objects with the following schema into `patch_review_ai_report.json`. No conversational text, only parse-able JSON.
+
+```json
+[
+  {
+    "IssueID": "string (e.g., RHSA-202X:YYYY)",
+    "Component": "string (e.g., curl, openssl)",
+    "Version": "string",
+    "Vendor": "string (e.g., Red Hat, Oracle, Ubuntu)",
+    "Date": "string (YYYY-MM-DD)",
+    "Criticality": "string (Critical, High, Medium, Low)",
+    "Description": "string (English Summary of the issue limit 2 sentences)",
+    "KoreanDescription": "string (Korean Translation of Description)"
+  }
+]
+``` 등 규격화된 컬럼으로 출력하도록 강제하십시오.
 
 ---
 
@@ -52,7 +67,7 @@
 **Step 3.2: Pipeline Execution API (`/api/pipeline/execute/route.ts`)**
 - 웹에서 "Run Pipeline" 버튼 클릭 시 작동하는 엔드포인트입니다.
 - `child_process.spawn`을 사용하여 서버 자체적으로 `batch_collector.js` -> `patch_preprocessing.py` -> OpenClaw CLI 명령어를 순차적으로 구동시키고 그 과정을 `status.json`과 `debug.log`에 실시간으로 기록하십시오.
-- **캐시 버그 방지 로직 (매우 중요)**: 파이프라인이 새로 실행될 때, 과거에 생성되었던 데이터(`batch_data/`, `patches_for_llm_review.json`, `patch_review_final_report.csv`, 산출된 `final_approved_patches_[prod].csv`)들을 고유 타임스탬프를 가진 `archive/` 백업 폴더로 통째로 옮겨 완벽하게 상태를 초기화(Reset)한 뒤 구동되어야 합니다.
+- **캐시 버그 방지 로직 (매우 중요)**: 파이프라인이 새로 실행될 때, 과거에 생성되었던 데이터(`batch_data/`, `patches_for_llm_review.json`, `patch_review_ai_report.json`, 산출된 `final_approved_patches_[prod].csv`)들을 고유 타임스탬프를 가진 `archive/` 백업 폴더로 통째로 옮겨 완벽하게 상태를 초기화(Reset)한 뒤 구동되어야 합니다.
 
 **Step 3.3: Interactive AI Feedback Loop (Self-Learning UI)**
 - 대시보드의 특정 패치 카드 우측 상단에 "제외(Exclude)" 체크박스를 만드십시오.
@@ -60,8 +75,10 @@
 - 제출 시 `user_exclusion_feedback.json` 파일에 해당 사유가 기록됩니다. 이 JSON 파일은 다음번 파이프라인 구동 시, OpenClaw AI에게 주입되는 프롬프트에 동적으로 첨부되어 "이 패치들은 사용자가 제외시켰으니 앞으로 추천 목록에서 아예 필터링해라"라는 자가 학습(Self-Learning) 문맥으로 들어가야 합니다.
 
 **Step 3.4: Finalize & CSV Export**
-- 제외되지 않고 관리자가 최종 승인한 안전한 패치 목록들만 추려내는 `finalize` API를 만드십시오.
-- 원본 CSV(`patch_review_final_report.csv`)를 `PapaParse`로 정확하게 읽어들여 필터링한 뒤, `final_approved_patches_[OS명].csv` 파일로 리눅스 시스템에 저장하고 유저가 다운로드 받을 수 있는 버튼을 노출하십시오.
+3.  **Perform AI Review (LLM Processing)**
+    *   Using the `patch_review_raw.csv` and the `user_exclusion_feedback.json` (to skip processing user-dismissed patches), the LLM must review each patch.
+    *   **CRITICAL MUST-DO**: For each evaluated patch, generate a strict evaluation and output it directly to a JSON file format.
+    *   **OUTPUT FILE**: Save the generated structured JSON into `[WORKSPACE_DIR]/skills/patch-review/os/linux/patch_review_ai_report.json`.
 
 **Step 3.5: i18n Localization (다국어 아키텍처 지원)**
 - 모든 UI의 하드코딩된 영문 텍스트를 제거하십시오.

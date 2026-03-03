@@ -47,7 +47,7 @@ export async function POST(request: Request) {
                 const batchDataDir = path.join(linuxSkillDir, 'batch_data');
                 const debugLogFile = path.join(linuxSkillDir, 'debug_collector.log');
                 const preprocessedFile = path.join(linuxSkillDir, 'patches_for_llm_review.json');
-                const finalReportFile = path.join(linuxSkillDir, 'patch_review_final_report.csv');
+                const finalReportFile = path.join(linuxSkillDir, 'patch_review_ai_report.json'); // Changed to JSON
 
                 const approvedFiles = ['redhat', 'oracle', 'ubuntu'].map(prod =>
                     path.join(linuxSkillDir, `final_approved_patches_${prod}.csv`)
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
                     }
 
                     if (fs.existsSync(finalReportFile)) {
-                        fs.renameSync(finalReportFile, path.join(archiveDir, 'patch_review_final_report.csv'));
+                        fs.renameSync(finalReportFile, path.join(archiveDir, 'patch_review_ai_report.json'));
                     }
                     ['redhat', 'oracle', 'ubuntu'].forEach(prod => {
                         const approvedFile = path.join(linuxSkillDir, `final_approved_patches_${prod}.csv`);
@@ -124,7 +124,7 @@ export async function POST(request: Request) {
 
                     const openClawPath = '/home/citec/.nvm/versions/node/v22.22.0/bin/node';
                     const openClawScript = '/home/citec/.nvm/versions/node/v22.22.0/bin/openclaw';
-                    let aiPrompt = "Read SKILL.md. Note that Step 1 and Step 2 are perfectly complete, and patches_for_llm_review.json is generated. Therefore, you must start from Step 3: Impact Analysis, and then proceed to finalize Step 4: Final Report Generation, saving the exact patch_review_final_report.csv format. I have provided a few-shot best practice example at best_practice_report.csv in this directory. Please read it to deeply understand the expected CSV output format and analytical quality. Ensure you do not skip Step 4. Auto-complete everything.";
+                    let aiPrompt = "Read SKILL.md. Note that Step 1 and Step 2 are completed, and patches_for_llm_review.json is generated. Therefore, you must start from Step 3: Impact Analysis, and then proceed to finalize Step 4: Final JSON Generation. CRITICAL INSTRUCTION: You MUST output the final analytical result EXCLUSIVELY to a file named patch_review_ai_report.json (NOT A CSV). The JSON must be an array of objects. Each object MUST strictly contain the exact exact following string keys: 'IssueID', 'Component', 'Version', 'Vendor', 'Date', 'Criticality', 'Description', and 'KoreanDescription'. Do not skip Step 4. Auto-complete everything without user prompting.";
 
                     const feedbackFile = path.join(linuxSkillDir, 'user_exclusion_feedback.json');
                     if (fs.existsSync(feedbackFile)) {
@@ -132,7 +132,7 @@ export async function POST(request: Request) {
                             const feedbackList = JSON.parse(fs.readFileSync(feedbackFile, 'utf-8'));
                             if (Array.isArray(feedbackList) && feedbackList.length > 0) {
                                 const exclusionRules = feedbackList.map((f: any) => `- Issue: ${f.issueId}, Description: ${f.description}, Reason for exclusion: ${f.reason}`).join('\n');
-                                aiPrompt += `\n\nCRITICAL INSTRUCTION: Reviewers have manually marked the following historical patches to be explicitly EXCLUDED from final recommendations for the provided reasons:\n${exclusionRules}\n\nIf you encounter any patches in patches_for_llm_review.json that are highly similar or identical to these excluded patch descriptions/reasons, you MUST filter them out and NOT include them in the final patch_review_final_report.csv.`;
+                                aiPrompt += `\n\nCRITICAL INSTRUCTION: Reviewers have manually marked the following historical patches to be explicitly EXCLUDED from final recommendations for the provided reasons:\n${exclusionRules}\n\nIf you encounter any patches in patches_for_llm_review.json that are highly similar or identical to these excluded patch descriptions/reasons, you MUST filter them out and NOT include them in the final patch_review_ai_report.json.`;
                                 console.log("[Pipeline] Injected User Exclusion Feedback into AI Prompt.");
                             }
                         } catch (e) {
@@ -142,9 +142,9 @@ export async function POST(request: Request) {
 
                     await runStep(openClawPath, [openClawScript, 'agent', '--agent', 'main', '--message', aiPrompt], 'AI Analysis', { cwd: linuxSkillDir });
 
-                    const finalReportPath = path.join(linuxSkillDir, 'patch_review_final_report.csv');
+                    const finalReportPath = path.join(linuxSkillDir, 'patch_review_ai_report.json');
                     if (!fs.existsSync(finalReportPath)) {
-                        throw new Error("외부 LLM 모델이 응답이 없거나 기한 내 최종 리포트를 생성하지 못했습니다. 추후 'AI 리뷰 재작동'을 눌러 해당 단계만 별도로 수행해 주십시오.");
+                        throw new Error("외부 LLM 모델이 응답이 없거나 기한 내 최종 리포트(JSON)를 생성하지 못했습니다. 추후 'AI 리뷰 재작동'을 눌러 해당 단계만 별도로 수행해 주십시오.");
                     }
 
                     const completedAt = new Date().toISOString();

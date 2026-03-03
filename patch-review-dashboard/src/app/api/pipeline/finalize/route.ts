@@ -15,31 +15,29 @@ export async function POST(req: Request) {
         const workspacePath = process.env.OPENCLAW_WORKSPACE || path.join(require('os').homedir(), '.openclaw/workspace');
         // Define pathways for source data and output destination
         const basePath = path.join(workspacePath, 'skills/patch-review', categoryId || 'os', 'linux');
-        const sourceCsvPath = path.join(basePath, 'patch_review_final_report.csv');
+        const sourceJsonPath = path.join(basePath, 'patch_review_ai_report.json');
         const outputCsvPath = path.join(basePath, `final_approved_patches_${productId}.csv`);
 
         // Verify AI reviewed data exists
         try {
-            await fs.access(sourceCsvPath);
+            await fs.access(sourceJsonPath);
         } catch {
-            return NextResponse.json({ error: 'AI Review CSV missing. Cannot finalize.' }, { status: 404 });
+            return NextResponse.json({ error: 'AI Review JSON missing. Cannot finalize.' }, { status: 404 });
         }
 
-        // Read the AI generated CSV
-        const rawContent = await fs.readFile(sourceCsvPath, 'utf8');
-        const parsedCsv = Papa.parse(rawContent, { header: true, skipEmptyLines: true });
-
-        let allPatches = parsedCsv.data as any[];
+        // Read the AI generated JSON
+        const rawContent = await fs.readFile(sourceJsonPath, 'utf8');
+        let allPatches = JSON.parse(rawContent);
 
         // Filter the preprocessed data to ONLY include patches that match approvedIssueIds
         const approvedPatches = allPatches.filter((patch: any) => {
-            const pid = patch['Issue ID'] || patch.IssueID || patch.Issue_ID || patch.id;
+            const pid = patch.IssueID || patch['Issue ID'] || patch.Issue_ID || patch.id;
             return pid && approvedIssueIds.includes(pid);
         });
 
         if (approvedPatches.length === 0) {
             // Write empty CSV with headers
-            const emptyCsv = Papa.unparse([], { columns: parsedCsv.meta.fields });
+            const emptyCsv = Papa.unparse([], { columns: ['IssueID', 'Component', 'Version', 'Vendor', 'Date', 'Criticality', 'Description', 'KoreanDescription'] });
             await fs.writeFile(outputCsvPath, emptyCsv, 'utf8');
             return NextResponse.json({ message: 'Finalized. No patches were approved.', count: 0 });
         }

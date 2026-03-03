@@ -19,12 +19,12 @@ export async function GET() {
             const stat = fs.statSync(itemPath);
 
             if (stat.isDirectory()) {
-                const hasFinalCSV = fs.existsSync(path.join(itemPath, 'patch_review_final_report.csv'));
+                const hasFinalJSON = fs.existsSync(path.join(itemPath, 'patch_review_ai_report.json'));
 
                 archives.push({
                     id: item,
                     createdAt: stat.birthtime || stat.mtime,
-                    hasFinalCSV
+                    hasFinalJSON
                 });
             }
         }

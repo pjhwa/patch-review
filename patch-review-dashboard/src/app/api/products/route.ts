@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     const linuxSkillDir = path.join(process.env.HOME || '/home/citec', '.openclaw/workspace/skills/patch-review/os/linux');
     const batchDataDir = path.join(linuxSkillDir, 'batch_data');
     const preprocessedFile = path.join(linuxSkillDir, 'patches_for_llm_review.json');
-    const finalReportFile = path.join(linuxSkillDir, 'patch_review_final_report.csv');
+    const finalReportFile = path.join(linuxSkillDir, 'patch_review_ai_report.json');
 
     // Default counts
     const counts = {
@@ -53,16 +53,17 @@ export async function GET(request: Request) {
         }
     } catch (e) { console.error("Error reading preprocessed:", e); }
 
-    // 3. Count Reviewed (from patch_review_final_report.csv)
+    // 3. Count Reviewed (from patch_review_ai_report.json)
     try {
         if (fs.existsSync(finalReportFile)) {
-            const csvData = fs.readFileSync(finalReportFile, 'utf-8');
-            const lines = csvData.split('\n');
-            // Simplified hit search for CSV representation
-            for (const line of lines) {
-                if (line.includes('Red Hat')) counts.redhat.reviewed++;
-                else if (line.includes('Oracle')) counts.oracle.reviewed++;
-                else if (line.includes('Ubuntu')) counts.ubuntu.reviewed++;
+            const reviewedData = JSON.parse(fs.readFileSync(finalReportFile, 'utf-8'));
+            if (Array.isArray(reviewedData)) {
+                for (const item of reviewedData) {
+                    const vendorStr = String(item.Vendor || item.vendor || '').toLowerCase();
+                    if (vendorStr.includes('red hat')) counts.redhat.reviewed++;
+                    else if (vendorStr.includes('oracle')) counts.oracle.reviewed++;
+                    else if (vendorStr.includes('ubuntu')) counts.ubuntu.reviewed++;
+                }
             }
         }
     } catch (e) { console.error("Error reading reviewed:", e); }

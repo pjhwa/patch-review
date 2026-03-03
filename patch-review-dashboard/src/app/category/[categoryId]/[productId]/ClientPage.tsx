@@ -190,7 +190,7 @@ export function ProductDetailClient({ categoryId, productId, dict }: { categoryI
                                         let isApproved = false;
                                         if (reviewedData?.data && Array.isArray(reviewedData.data)) {
                                             isApproved = reviewedData.data.some((rPatch: any) => {
-                                                const rId = rPatch['Issue ID'] || rPatch.IssueID || rPatch.Issue_ID;
+                                                const rId = rPatch.IssueID || rPatch['Issue ID'] || rPatch.Issue_ID;
                                                 return rId === patch.id || rId === patch.original_id || rId === patch.Name;
                                             });
                                         }
@@ -268,7 +268,7 @@ export function ProductDetailClient({ categoryId, productId, dict }: { categoryI
                             {reviewedData?.data && Array.isArray(reviewedData.data) ? (
                                 <div className="space-y-6">
                                     {reviewedData.data.map((patch: any, idx: number) => {
-                                        const issueId = patch['Issue ID'] || patch.IssueID || patch.Issue_ID || `${dict.dashboard.productDetail.unknownIssuePrefix}${idx}`;
+                                        const issueId = patch.IssueID || patch['Issue ID'] || patch.Issue_ID || `${dict.dashboard.productDetail.unknownIssuePrefix}${idx}`;
                                         const isCritical = patch.Criticality?.toLowerCase() === 'critical';
                                         const isExcludedLocally = localExclusions[issueId]?.excluded;
                                         const isSavedLocally = feedbacks.some(f => f.issueId === issueId && f.reason === localExclusions[issueId]?.reason);
@@ -332,7 +332,7 @@ export function ProductDetailClient({ categoryId, productId, dict }: { categoryI
                                                                     />
                                                                     <button
                                                                         className="px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white font-medium rounded-lg text-sm transition-colors flex items-center gap-2 disabled:opacity-50 disabled:bg-zinc-800 disabled:text-zinc-500 border border-red-500 disabled:border-zinc-700 shadow-[0_0_15px_rgba(239,68,68,0.4)] disabled:shadow-none whitespace-nowrap"
-                                                                        onClick={() => handleSaveFeedback(issueId, patch['Patch Description'] || patch.PatchDescription || "Unknown")}
+                                                                        onClick={() => handleSaveFeedback(issueId, patch.Description || patch['Patch Description'] || patch.PatchDescription || "Unknown")}
                                                                         disabled={!localExclusions[issueId]?.category || !localExclusions[issueId]?.detail || isSavedLocally || savingId === issueId}
                                                                     >
                                                                         {savingId === issueId ? <Loader2 className="w-4 h-4 animate-spin" /> : (isSavedLocally ? dict.dashboard.feedback.feedbackSaved : dict.dashboard.feedback.submitFeedback)}
@@ -372,15 +372,15 @@ export function ProductDetailClient({ categoryId, productId, dict }: { categoryI
                                                     <div className="mt-2 space-y-4">
                                                         <div>
                                                             <p className="text-xs text-white/40 uppercase tracking-wider mb-1">{dict.dashboard.productDetail.description}</p>
-                                                            <p className="text-sm text-white/70 font-light leading-relaxed">{patch['Patch Description'] || patch.PatchDescription}</p>
+                                                            <p className="text-sm text-white/70 font-light leading-relaxed">{patch.Description || patch['Patch Description'] || patch.PatchDescription}</p>
                                                         </div>
-                                                        {patch['한글 설명'] && (
+                                                        {(patch.KoreanDescription || patch['한글 설명']) && (
                                                             <div className="p-4 bg-blue-500/10 rounded-lg border border-blue-500/20">
                                                                 <p className="text-[10px] text-blue-400/80 font-semibold uppercase tracking-widest mb-2 flex items-center gap-2">
                                                                     <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
                                                                     {dict.dashboard.productDetail.aiTranslation}
                                                                 </p>
-                                                                <p className="text-sm text-blue-100 font-medium leading-relaxed">{patch['한글 설명']}</p>
+                                                                <p className="text-sm text-blue-100 font-medium leading-relaxed">{patch.KoreanDescription || patch['한글 설명']}</p>
                                                             </div>
                                                         )}
                                                     </div>
@@ -404,10 +404,10 @@ export function ProductDetailClient({ categoryId, productId, dict }: { categoryI
                                             try {
                                                 const approvedIssueIds = reviewedData.data
                                                     .filter((patch: any) => {
-                                                        const issueId = patch['Issue ID'] || patch.IssueID || patch.Issue_ID;
+                                                        const issueId = patch.IssueID || patch['Issue ID'] || patch.Issue_ID;
                                                         return !localExclusions[issueId]?.excluded;
                                                     })
-                                                    .map((patch: any) => patch['Issue ID'] || patch.IssueID || patch.Issue_ID);
+                                                    .map((patch: any) => patch.IssueID || patch['Issue ID'] || patch.Issue_ID);
 
                                                 const res = await fetch('/api/pipeline/finalize', {
                                                     method: 'POST',
