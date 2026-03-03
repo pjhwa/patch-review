@@ -175,12 +175,7 @@ async function scrapeRedHat(browser) {
                 const pageAdvisories = await page.evaluate(() => {
                     let rows = Array.from(document.querySelectorAll('.search-result-table tbody tr'));
                     if (rows.length === 0) {
-                        const links = Array.from(document.querySelectorAll('a[href*="/errata/RHSA"]'));
-                        return links.map(link => ({
-                            id: link.innerText.trim(),
-                            url: link.href,
-                            dateStr: new Date().toISOString()
-                        }));
+                        throw new Error('Table rows did not render in time. Forcing retry or skip.');
                     }
                     return rows.map(row => {
                         const idLink = row.querySelector('td a') || row.querySelector('th a');
@@ -197,20 +192,24 @@ async function scrapeRedHat(browser) {
                 });
 
                 if (pageAdvisories.length > 0) {
-                    const oldestDate = parseDate(pageAdvisories[pageAdvisories.length - 1].dateStr);
-                    if (oldestDate < TARGET_START_DATE) {
-                        console.log(`[REDHAT] Page ${i}: Reached advisories before ${TARGET_START_DATE.toISOString().split('T')[0]}. Stopping pagination.`);
-                        const filtered = pageAdvisories.filter(adv => parseDate(adv.dateStr) >= TARGET_START_DATE);
-                        allAdvisories.push(...filtered);
-                        shouldContinue = false;
-                        break;
+                    const validDates = pageAdvisories.filter(a => a.dateStr).map(a => parseDate(a.dateStr));
+                    if (validDates.length > 0) {
+                        const oldestDate = new Date(Math.min(...validDates));
+                        if (oldestDate < TARGET_START_DATE) {
+                            console.log(`[REDHAT] Page ${i}: Reached advisories before ${TARGET_START_DATE.toISOString().split('T')[0]}. Stopping pagination.`);
+                            const filtered = pageAdvisories.filter(adv => !adv.dateStr || parseDate(adv.dateStr) >= TARGET_START_DATE);
+                            allAdvisories.push(...filtered);
+                            shouldContinue = false;
+                            break;
+                        }
                     }
                 }
 
                 allAdvisories.push(...pageAdvisories);
 
             } catch (err) {
-                console.error(`[REDHAT] Error page ${i}: ${err.message}`);
+                console.error(`[REDHAT] Error page ${i}: ${err.message}. Stopping pagination.`);
+                shouldContinue = false;
             }
         }
 
@@ -317,9 +316,10 @@ async function scrapeUbuntuWeb(browser) {
 
                         // Try to find date from parent row/container
                         let dateStr = '';
-                        const row = link.closest('tr, li, .row, .notice-item');
-                        if (row) {
-                            const dateMatch = row.innerText.match(/(\d{1,2}\s+\w+\s+\d{4})/);
+                        // The anchor is likely under a h3 inside a div, sibling to the row div
+                        const container = link.closest('.p-strip') || link.parentElement.parentElement.parentElement;
+                        if (container) {
+                            const dateMatch = container.innerText.match(/(\d{1,2}\s+\w+\s+\d{4})/);
                             if (dateMatch) dateStr = dateMatch[1];
                         }
 
@@ -345,8 +345,11 @@ async function scrapeUbuntuWeb(browser) {
                 if (datedAdvisories.length > 0) {
                     const oldestDate = parseDate(datedAdvisories[datedAdvisories.length - 1].dateStr);
                     if (oldestDate < TARGET_START_DATE && oldestDate > new Date('2000-01-01')) {
-                        console.log(`[UBUNTU] Page ${i + 1}: Reached advisories before target start date. Stopping pagination.`);
+                        console.log(`[UBUNTU] Page ${i + 1}: Reached advisories before ${TARGET_START_DATE.toISOString().split('T')[0]}. Stopping pagination.`);
+                        const filtered = pageAdvisories.filter(adv => !adv.dateStr || parseDate(adv.dateStr) >= TARGET_START_DATE);
+                        allAdvisories.push(...filtered);
                         shouldContinue = false;
+                        break;
                     }
                 }
 
@@ -435,68 +438,239 @@ async function processInBatches(browser, items, vendorTitle, asyncWorker) {
     return browserDead;
 }
 
+// --- WORKER DEFs ---
+const redhatWorker = async (ctxPage, adv) => {
+    await ctxPage.goto(adv.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    const details = await ctxPage.evaluate(() => {
+        const main = document.querySelector('#main-content') || document.body;
+        const clones = main.cloneNode(true);
+        clones.querySelectorAll('nav, footer, script, style, .hide').forEach(n => n.remove());
+
+        // Recursive formatter to respect block elements and nesting
+        function extractTextWithNewlines(node) {
+            if (node.nodeType === 3) { // Text node
+                return node.nodeValue || '';
+            }
+            if (node.nodeType !== 1) return ''; // Skip non-element
+
+            let text = '';
+            const isBlock = /^(DIV|P|H[1-6]|LI|TR|UL|OL|TABLE|BLOCKQUOTE|PRE)$/i.test(node.tagName);
+
+            for (let child of node.childNodes) {
+                text += extractTextWithNewlines(child);
+            }
+
+            if (isBlock) {
+                text = '\n' + text + '\n';
+            }
+            return text;
+        }
+
+        let text = extractTextWithNewlines(clones)
+            .replace(/[ \t]+/g, ' ')       // collapse multiple spaces/tabs into one
+            .replace(/ \n /g, '\n')       // clean spaces around newlines
+            .replace(/\n{3,}/g, '\n\n')   // collapse 3+ newlines into maximum 2
+            .trim();
+
+        const detailsObj = {
+            overview: '',
+            description: '',
+            packages: [],
+            cves: [],
+            fixes: '',
+            notes: ''
+        };
+
+        const getSection = (header, nextHeaders) => {
+            const regex = new RegExp(`(?:^|\\n)${header}\\s*\\n(.*?)(?:\\n(?:${nextHeaders.join('|')})\\s*\\n|$)`, 's');
+            const match = text.match(regex);
+            return match ? match[1].trim() : '';
+        };
+
+        const rhHeaders = ['Synopsis', 'Topic', 'Description', 'Solution', 'Affected Products', 'Fixes', 'CVEs', 'References', 'Updated Packages'];
+
+        detailsObj.overview = getSection('Topic', rhHeaders);
+        detailsObj.description = getSection('Description', rhHeaders);
+        detailsObj.fixes = getSection('Fixes', rhHeaders);
+
+        const cvesText = getSection('CVEs', rhHeaders);
+        if (cvesText) {
+            detailsObj.cves = [...new Set(cvesText.match(/CVE-\d{4}-\d+/g) || [])];
+        } else {
+            const allCves = text.match(/CVE-\d{4}-\d+/g);
+            if (allCves) detailsObj.cves = [...new Set(allCves)];
+        }
+
+        const pkgsText = getSection('Updated Packages', rhHeaders);
+        if (pkgsText) {
+            detailsObj.packages = pkgsText.split('\n')
+                .filter(l => l.includes('.rpm'))
+                .map(l => l.trim().split(' ')[0]);
+        }
+
+        return {
+            ...detailsObj,
+            full_text: text.slice(0, 6000),
+            title: document.title
+        };
+    });
+    saveAdvisory(adv.id, { ...adv, ...details, vendor: 'Red Hat' });
+};
+
+const oracleWorker = async (ctxPage, adv) => {
+    await ctxPage.goto(adv.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    const details = await ctxPage.evaluate(() => {
+        const pre = document.querySelector('pre');
+        if (pre) return { full_text: pre.innerText.trim() };
+
+        function extractTextWithNewlines(node) {
+            if (node.nodeType === 3) return node.nodeValue || '';
+            if (node.nodeType !== 1) return '';
+            let text = '';
+            const isBlock = /^(DIV|P|H[1-6]|LI|TR|UL|OL|TABLE|BLOCKQUOTE|PRE)$/i.test(node.tagName);
+            for (let child of node.childNodes) text += extractTextWithNewlines(child);
+            if (isBlock) text = '\n' + text + '\n';
+            return text;
+        }
+
+        let text = extractTextWithNewlines(document.body)
+            .replace(/[ \t]+/g, ' ')
+            .replace(/ \n /g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+
+        // Structured Extraction from Oracle's mailing text
+        const detailsObj = {
+            overview: '',
+            description: '',
+            packages: [],
+            cves: [],
+            fixes: '',
+            notes: ''
+        };
+
+        // Match CVEs
+        const cveMatches = text.match(/CVE-\d{4}-\d+/g);
+        if (cveMatches) {
+            detailsObj.cves = [...new Set(cveMatches)];
+        }
+
+        // Extract Description of changes
+        const descMatch = text.match(/Description of changes:(.*?)($|Related CVEs:|Oracle Linux Security Advisory)/s);
+        if (descMatch) {
+            detailsObj.description = descMatch[1].trim();
+        }
+
+        // Extract RPMs
+        const rpmsMatch = text.match(/x86_64:(.*?)SRPMS:/s) || text.match(/aarch64:(.*?)SRPMS:/s);
+        if (rpmsMatch) {
+            const lines = rpmsMatch[1].split('\n').map(l => l.trim()).filter(l => l && l.endsWith('.rpm'));
+            detailsObj.packages = lines;
+        }
+
+        return { ...detailsObj, full_text: text.slice(0, 5000) };
+    });
+    saveAdvisory(adv.id, { ...adv, ...details, vendor: 'Oracle' });
+};
+
+const ubuntuWorker = async (ctxPage, adv) => {
+    await ctxPage.goto(adv.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    const details = await ctxPage.evaluate(() => {
+        const main = document.querySelector('main') || document.body;
+        const clones = main.cloneNode(true);
+        clones.querySelectorAll('nav, footer, script, style, .hide').forEach(n => n.remove());
+
+        function extractTextWithNewlines(node) {
+            if (node.nodeType === 3) return node.nodeValue || '';
+            if (node.nodeType !== 1) return '';
+            let text = '';
+            const isBlock = /^(DIV|P|H[1-6]|LI|TR|UL|OL|TABLE|BLOCKQUOTE|PRE)$/i.test(node.tagName);
+            for (let child of node.childNodes) text += extractTextWithNewlines(child);
+            if (isBlock) text = '\n' + text + '\n';
+            return text;
+        }
+
+        let text = extractTextWithNewlines(clones)
+            .replace(/[ \t]+/g, ' ')
+            .replace(/ \n /g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+
+        const dateMatch = text.match(/(\d{1,2}\s+\w+\s+\d{4})/);
+        const pubDate = dateMatch ? dateMatch[1] : '';
+
+        const detailsObj = {
+            overview: '',
+            description: '',
+            packages: [],
+            cves: [],
+            affected_products: [],
+            fixes: '',
+            notes: ''
+        };
+
+        const getSection = (header, nextHeaders) => {
+            const regex = new RegExp(`(?:^|\\n)${header}\\s*\\n(.*?)(?:\\n(?:${nextHeaders.join('|')})\\s*\\n|$)`, 's');
+            const match = text.match(regex);
+            return match ? match[1].trim() : '';
+        };
+
+        const ubnHeaders = ['Overview', 'Releases', 'Packages', 'Details', 'Update instructions', 'Ubuntu Release & Package Version', 'References', 'Related notices', 'Reduce your security exposure'];
+
+        detailsObj.overview = getSection('Overview', ubnHeaders);
+        detailsObj.description = getSection('Details', ubnHeaders);
+
+        const relText = getSection('Releases', ubnHeaders);
+        if (relText) {
+            detailsObj.affected_products = relText.split('\n').map(l => l.trim()).filter(Boolean);
+        }
+
+        const pkgText = getSection('Packages', ubnHeaders);
+        if (pkgText) {
+            detailsObj.packages = pkgText.split('\n').filter(l => l.includes('-')).map(l => l.split('-')[0].trim());
+        }
+
+        const refText = getSection('References', ubnHeaders);
+        if (refText) {
+            detailsObj.cves = [...new Set(refText.match(/CVE-\d{4}-\d+/g) || [])];
+        } else {
+            const allCves = text.match(/CVE-\d{4}-\d+/g);
+            if (allCves) detailsObj.cves = [...new Set(allCves)];
+        }
+
+        return {
+            ...detailsObj,
+            full_text: text.slice(0, 6000),
+            title: document.title,
+            pubDate: pubDate
+        };
+    });
+
+    // Check against `affected_products` safely + fallback to text
+    let hasTargetLTS = false;
+    if (details.affected_products && details.affected_products.length > 0) {
+        hasTargetLTS = details.affected_products.some(prod => UBUNTU_LTS_VERSIONS.some(ver => prod.includes(ver)));
+    } else {
+        hasTargetLTS = UBUNTU_LTS_VERSIONS.some(ver =>
+            details.full_text.includes(ver) || details.full_text.includes(`Ubuntu ${ver}`)
+        );
+    }
+
+    const pubDate = parseDate(details.pubDate || adv.dateStr || new Date().toISOString());
+
+    if (hasTargetLTS || process.env.RETRY_MODE === 'true') {
+        saveAdvisory(adv.id, { ...adv, ...details, vendor: 'Ubuntu', pubDate: pubDate.toISOString() });
+        return true;
+    }
+    return false;
+};
+
 // --- MAIN ---
 (async () => {
     console.log(`=== BATCH COLLECTOR START ===`);
     const dateConfig = parseDateRange();
     const retryMode = dateConfig.retryMode === true;
-
-    // Red Hat worker definition
-    const redhatWorker = async (ctxPage, adv) => {
-        await ctxPage.goto(adv.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        const details = await ctxPage.evaluate(() => {
-            const main = document.querySelector('#main-content') || document.body;
-            const clones = main.cloneNode(true);
-            clones.querySelectorAll('nav, footer, script, style, .hide').forEach(n => n.remove());
-            return {
-                full_text: clones.innerText.replace(/\s+/g, ' ').slice(0, 6000),
-                title: document.title
-            };
-        });
-        saveAdvisory(adv.id, { ...adv, ...details, vendor: 'Red Hat' });
-    };
-
-    // Oracle worker definition
-    const oracleWorker = async (ctxPage, adv) => {
-        await ctxPage.goto(adv.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        const details = await ctxPage.evaluate(() => {
-            const pre = document.querySelector('pre');
-            if (pre) return { full_text: pre.innerText };
-            return { full_text: document.body.innerText.replace(/\\s+/g, ' ').slice(0, 5000) };
-        });
-        saveAdvisory(adv.id, { ...adv, ...details, vendor: 'Oracle' });
-    };
-
-    // Ubuntu worker definition
-    const ubuntuWorker = async (ctxPage, adv) => {
-        await ctxPage.goto(adv.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        const details = await ctxPage.evaluate(() => {
-            const main = document.querySelector('main') || document.body;
-            const clones = main.cloneNode(true);
-            clones.querySelectorAll('nav, footer, script, style, .hide').forEach(n => n.remove());
-            const text = clones.innerText.replace(/\\s+/g, ' ');
-            const dateMatch = text.match(/(\\d{1,2}\\s+\\w+\\s+\\d{4})/);
-            return {
-                full_text: text.slice(0, 6000),
-                title: document.title,
-                pubDate: dateMatch ? dateMatch[1] : ''
-            };
-        });
-
-        const hasTargetLTS = UBUNTU_LTS_VERSIONS.some(ver =>
-            details.full_text.includes(ver) || details.full_text.includes(`Ubuntu ${ver}`)
-        );
-
-        const pubDate = parseDate(details.pubDate || adv.dateStr || new Date().toISOString());
-
-        // In retry mode, we bypass the date strictness if we already identified it as a failure to parse.
-        // Or we just evaluate if it applies and save.
-        if (hasTargetLTS || retryMode) {
-            saveAdvisory(adv.id, { ...adv, ...details, vendor: 'Ubuntu', pubDate: pubDate.toISOString() });
-            return true;
-        }
-        return false;
-    };
+    process.env.RETRY_MODE = retryMode ? 'true' : 'false';
 
     const workerMap = {
         'Red Hat': redhatWorker,
