@@ -293,6 +293,10 @@ def preprocess_patches():
         try:
             with open(json_path, 'r', encoding='utf-8') as jf:
                 data = json.load(jf)
+            
+            # Skip non-dict entries (e.g., collection_failures.json which is a list)
+            if not isinstance(data, dict):
+                continue
                 
             vendor = data.get('vendor', 'Unknown')
             patch_id = data.get('id', os.path.basename(json_path).replace('.json', ''))
@@ -304,6 +308,8 @@ def preprocess_patches():
             title = data.get('title', '')
             summary = data.get('synopsis', '')
             full_text = data.get('full_text', '') 
+            severity = data.get('severity', '')
+            affected_products = data.get('affected_products', [])
             
             # Content Cleaning (Red Hat)
             if vendor == "Red Hat":
@@ -332,8 +338,9 @@ def preprocess_patches():
                 
             # --- EXCLUSION FILTERS ---
             # 1. Garbage Data (Empty Content or Known Bad ID)
-            # Also exclude OpenShift product advisories (not RHEL core)
             if "openshift" in title.lower() or "openshift" in summary.lower():
+                continue
+            if "kubernetes" in title.lower() or "kubernetes" in summary.lower():
                 continue
             if "extended lifecycle" in title.lower() or "extended lifecycle" in summary.lower() or "extended lifecycle" in full_text.lower()[:500]:
                 continue
@@ -341,19 +348,30 @@ def preprocess_patches():
                 continue
             if (len(full_text) < 50 and vendor == "Red Hat") or patch_id == "RHSA-2026:2664":
                 continue
+            
+            # 2. Granular Severity Rule (Keep Critical/Important/None, Drop Moderate/Low)
+            if severity:
+                sev_lower = severity.lower()
+                if "moderate" in sev_lower or "low" in sev_lower:
+                    continue
+
+            # 3. Red Hat Specific Product Validation
+            if vendor == "Red Hat" and isinstance(affected_products, list) and len(affected_products) > 0:
+                has_valid_product = False
+                for prod in affected_products:
+                    # Require base OS version (8/9/10) OR SAP Solutions
+                    if re.search(r'Red Hat Enterprise Linux for x86_64\s*(?:[89]|10)\b', prod) or "Update Services for SAP Solutions" in prod:
+                        has_valid_product = True
+                        break
+                if not has_valid_product:
+                    continue
                 
-            # 2. Ubuntu Variant Exclusions
+            # 4. Ubuntu Variant Exclusions
             if vendor == "Ubuntu" and "kernel" in title.lower():
-                # Ubuntu patches applying to the base x86_64 kernel will always list
-                # the "linux - Linux kernel" package in the security advisory text.
-                # If a patch applies exclusively to variants (AWS, GCP, NVIDIA, FIPS, etc.),
-                # this base package string will be absent.
                 if "linux - linux kernel" not in full_text.lower():
                     continue
                 
-            # 3. User Blacklist (SAP, kernel-rt)
-            if "SAP" in title or "Update Services for SAP" in summary:
-                continue
+            # 5. User Blacklist (kernel-rt)
             if "real time" in title.lower() or "kernel-rt" in title.lower() or "kernel-rt" in summary.lower():
                 continue
             

@@ -490,8 +490,10 @@ const redhatWorker = async (ctxPage, adv) => {
             .trim();
 
         const detailsObj = {
+            severity: '',
             overview: '',
             description: '',
+            affected_products: [],
             packages: [],
             cves: [],
             fixes: '',
@@ -504,11 +506,33 @@ const redhatWorker = async (ctxPage, adv) => {
             return match ? match[1].trim() : '';
         };
 
-        const rhHeaders = ['Synopsis', 'Topic', 'Description', 'Solution', 'Affected Products', 'Fixes', 'CVEs', 'References', 'Updated Packages'];
+        const rhHeaders = ['Synopsis', 'Topic', 'Type/Severity', 'Description', 'Solution', 'Affected Products', 'Fixes', 'CVEs', 'References', 'Updated Packages'];
 
         detailsObj.overview = getSection('Topic', rhHeaders);
         detailsObj.description = getSection('Description', rhHeaders);
         detailsObj.fixes = getSection('Fixes', rhHeaders);
+
+        // Severity Parsing
+        const typeSeverity = getSection('Type/Severity', rhHeaders);
+        if (typeSeverity) {
+            const sevMatch = typeSeverity.match(/(Critical|Important|Moderate|Low)/i);
+            if (sevMatch) detailsObj.severity = sevMatch[1];
+        } else {
+            // Fallback to Synopsis if Type/Severity header is missing
+            const synopsis = getSection('Synopsis', rhHeaders);
+            if (synopsis) {
+                const sevMatch = synopsis.match(/(Critical|Important|Moderate|Low):/i);
+                if (sevMatch) detailsObj.severity = sevMatch[1];
+            }
+        }
+
+        // Affected Products Parsing
+        const affectedText = getSection('Affected Products', rhHeaders);
+        if (affectedText) {
+            detailsObj.affected_products = affectedText.split('\n')
+                .map(l => l.trim().replace(/^-\s*/, '')) // remove list hyphens if any
+                .filter(l => l.length > 0);
+        }
 
         const cvesText = getSection('CVEs', rhHeaders);
         if (cvesText) {
