@@ -45,6 +45,12 @@
   1. 리눅스 외부 명령어 중첩(`$()`)을 포함하는 스크립트를 SSH로 넘길 때는 겹따옴표(`""`) 대신 반드시 **단일 따옴표(`''`)**로 감싸서 로컬 윈도우 쉘의 사전 개입 조작을 원천 차단할 것.
   2. `kill` 등 민감한 파이프라인 명령을 넘길 때는 대상의 반환값이 공백일 수 있음을 유념하여 `kill -9 $(lsof -t -i:3000) 2>/dev/null || true` 와 같이 방어적 파이프라인 코딩을 구성할 것.
 
+### 2026-03-03 실패 사례: PowerShell에서의 명령어 체인 연결자(`&&`) 문법 오류
+- **문제**: 일괄적인 Git 조작을 위해 `git add . && git commit -m "..." && git push` 명령어를 실행했으나, `The token '&&' is not a valid statement separator in this version.` 구문 오류(ParserError) 발생. (사용자 제보 에러 유형 8)
+- **실패 이유**: 일반적인 Linux Bash, Windows CMD 또는 최신 PowerShell 7버전에서는 `&&`를 명령어 체이닝(앞 스크립트가 성공했을 때 뒤 스크립트를 실행) 용도로 지원하지만, 하위 버전의 기본 Windows PowerShell(V5 등)에서는 `&&` 토큰을 지원하지 않고 구문 분석 오류를 뱉어냄.
+- **교훈**: 호환성을 보장해야 하는 로컬 Windows PowerShell 환경에서 여러 명령어를 한 줄에 이어서 실행할 때에는 `&&` 대신 안전하게 **세미콜론(`;`)**을 구분자로 사용할 것. (예: `git add . ; git commit -m "..." ; git push origin master`)
+
+
 
 ---
 (이하 이전 기록)
