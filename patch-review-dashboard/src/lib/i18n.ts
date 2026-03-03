@@ -55,9 +55,12 @@ const dictionaries = {
                 recentExecutionAsk: " Are you sure you want to run it again so soon?",
                 freshStartDesc: "This will archive all existing batch data, JSON outputs, and CSV reports into a timestamped folder, and start a completely fresh collection. Your UI counts will temporarily be reset to 0.",
                 retryDesc: "This will preserve existing data and only attempt to collect patches that failed during the last run.",
+                aiOnlyTitle: "Run AI Review Only",
+                aiOnlyDesc: "This will skip data collection and safely trigger only the LLM Impact Analysis using the existing preprocessed patches.",
                 proceedAsk: "Do you wish to proceed?",
                 cancelBtn: "Cancel",
                 yesRetryBtn: "Yes, Retry",
+                yesAiOnlyBtn: "Start AI Review",
                 yesStartFreshBtn: "Yes, Start Fresh",
             },
             premiumCard: {
@@ -67,6 +70,7 @@ const dictionaries = {
                 approved: "Approved",
                 noData: "No data available",
                 runPipeline: "Run Pipeline",
+                runAiOnly: "Run AI Review",
                 reviewCompleted: "Review Completed"
             },
             productDetail: {
@@ -186,9 +190,12 @@ const dictionaries = {
                 recentExecutionAsk: " 정말로 지금 당장 다시 실행하시겠습니까?",
                 freshStartDesc: "이 작업을 수행하면 기존 배치 데이터, 파싱된 JSON 및 CSV 리포트가 타임스탬프와 함께 백업되며 새로운 정보 수집을 시작합니다. 임시로 사용자 UI의 통계 숫자가 0으로 초기화됩니다.",
                 retryDesc: "이 작업은 기존 데이터를 안전하게 보존하며 오직 지난 런 타임에 실패했던 패치 정보만 다시 수집을 시도합니다.",
+                aiOnlyTitle: "AI 리뷰 독립 재수행",
+                aiOnlyDesc: "기존에 수집 및 전처리 완료된 패치 기반으로 오직 LLM 프로세스만을 단독 구동합니다.",
                 proceedAsk: "정말로 계속 진행하시겠습니까?",
                 cancelBtn: "취소",
                 yesRetryBtn: "예, 재실행합니다",
+                yesAiOnlyBtn: "예, AI 리뷰 시작",
                 yesStartFreshBtn: "예, 완전히 새로 고칩니다",
             },
             premiumCard: {
@@ -198,6 +205,7 @@ const dictionaries = {
                 approved: "최종 승인됨",
                 noData: "테스트 데이터가 없습니다",
                 runPipeline: "파이프라인 실행",
+                runAiOnly: "AI 리뷰 재작동",
                 reviewCompleted: "마스터 리뷰 마감됨"
             },
             productDetail: {

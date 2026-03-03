@@ -6,9 +6,9 @@ import { useState } from 'react';
 import { Loader2, CheckCircle2 } from "lucide-react";
 
 export function PremiumCard({
-    title, stages, desc, active, href, categoryId, productId, isRunning, onRunPipeline, isReviewCompleted, dict
+    title, stages, desc, active, href, categoryId, productId, isRunning, onRunPipeline, onRunAiOnly, isReviewCompleted, dict
 }: {
-    title: string, stages?: { collected: number, preprocessed: number, reviewed: number, approved?: number }, desc: string, active: boolean, href: string, categoryId: string, productId: string, isRunning?: boolean, onRunPipeline?: () => void, isReviewCompleted?: boolean, dict?: any
+    title: string, stages?: { collected: number, preprocessed: number, reviewed: number, approved?: number }, desc: string, active: boolean, href: string, categoryId: string, productId: string, isRunning?: boolean, onRunPipeline?: () => void, onRunAiOnly?: () => void, isReviewCompleted?: boolean, dict?: any
 }) {
 
     return (
@@ -44,14 +44,26 @@ export function PremiumCard({
             {active && (
                 <div className="px-6 pb-6 flex flex-col gap-3">
                     <div className="flex items-center justify-between gap-2">
-                        <button
-                            onClick={onRunPipeline}
-                            disabled={isRunning}
-                            className="text-xs px-2 py-1 rounded flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 transition-colors z-10 relative disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {isRunning && <Loader2 className="w-3 h-3 animate-spin" />}
-                            {dict?.dashboard?.premiumCard?.runPipeline || 'Run Pipeline'}
-                        </button>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={onRunPipeline}
+                                disabled={isRunning}
+                                className="text-xs px-2 py-1 rounded flex items-center gap-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 transition-colors z-10 relative disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {isRunning && <Loader2 className="w-3 h-3 animate-spin" />}
+                                {dict?.dashboard?.premiumCard?.runPipeline || 'Run Pipeline'}
+                            </button>
+                            {stages && stages.preprocessed > 0 && stages.reviewed === 0 && !isReviewCompleted && (
+                                <button
+                                    onClick={onRunAiOnly}
+                                    disabled={isRunning}
+                                    className="text-xs px-2 py-1 rounded flex items-center gap-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 transition-colors z-10 relative disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {isRunning && <Loader2 className="w-3 h-3 animate-spin" />}
+                                    {dict?.dashboard?.premiumCard?.runAiOnly || 'Run AI Review'}
+                                </button>
+                            )}
+                        </div>
                         {isReviewCompleted && (
                             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.1)] relative z-10">
                                 <CheckCircle2 className="w-3.5 h-3.5" />

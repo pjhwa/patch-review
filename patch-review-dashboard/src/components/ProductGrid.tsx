@@ -10,7 +10,7 @@ export function ProductGrid({ categoryId, products, dict }: { categoryId: string
     const [logTail, setLogTail] = useState("");
     const [lastCompletedAt, setLastCompletedAt] = useState<string | null>(null);
     const [failureCount, setFailureCount] = useState<number>(0);
-    const [confirmDialog, setConfirmDialog] = useState<{ isOpen: boolean, productId: string | null, isRetry: boolean }>({ isOpen: false, productId: null, isRetry: false });
+    const [confirmDialog, setConfirmDialog] = useState<{ isOpen: boolean, productId: string | null, isRetry: boolean, isAiOnly: boolean }>({ isOpen: false, productId: null, isRetry: false, isAiOnly: false });
     const [isDownloading, setIsDownloading] = useState(false);
     const router = useRouter();
 
@@ -47,26 +47,26 @@ export function ProductGrid({ categoryId, products, dict }: { categoryId: string
         return () => clearInterval(interval);
     }, [router]);
 
-    const requestRunPipeline = (productId: string, isRetry: boolean = false) => {
-        setConfirmDialog({ isOpen: true, productId, isRetry });
+    const requestRunPipeline = (productId: string, isRetry: boolean = false, isAiOnly: boolean = false) => {
+        setConfirmDialog({ isOpen: true, productId, isRetry, isAiOnly });
     };
 
     const confirmRun = () => {
         if (confirmDialog.productId) {
-            handleRunSharedPipeline(confirmDialog.productId, confirmDialog.isRetry);
+            handleRunSharedPipeline(confirmDialog.productId, confirmDialog.isRetry, confirmDialog.isAiOnly);
         }
-        setConfirmDialog({ isOpen: false, productId: null, isRetry: false });
+        setConfirmDialog({ isOpen: false, productId: null, isRetry: false, isAiOnly: false });
     };
 
-    const handleRunSharedPipeline = async (productId: string, isRetry: boolean = false) => {
+    const handleRunSharedPipeline = async (productId: string, isRetry: boolean = false, isAiOnly: boolean = false) => {
         setIsRunning(true);
-        setResultMsg(isRetry ? dict.dashboard.productGrid.initiatingRetry : dict.dashboard.productGrid.initiatingPipeline);
+        setResultMsg(isAiOnly ? dict.dashboard.productGrid.initiatingPipeline : (isRetry ? dict.dashboard.productGrid.initiatingRetry : dict.dashboard.productGrid.initiatingPipeline));
 
         try {
             const res = await fetch('/api/pipeline/execute', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ category: categoryId, productId: productId, isRetry })
+                body: JSON.stringify({ category: categoryId, productId: productId, isRetry, isAiOnly })
             });
 
             const data = await res.json();
@@ -121,7 +121,8 @@ export function ProductGrid({ categoryId, products, dict }: { categoryId: string
                         productId={prod.id}
                         isRunning={isRunning && prod.active}
                         isReviewCompleted={prod.isReviewCompleted}
-                        onRunPipeline={() => requestRunPipeline(prod.id, false)}
+                        onRunPipeline={() => requestRunPipeline(prod.id, false, false)}
+                        onRunAiOnly={() => requestRunPipeline(prod.id, false, true)}
                         dict={dict}
                     />
                 ))}
@@ -165,28 +166,30 @@ export function ProductGrid({ categoryId, products, dict }: { categoryId: string
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
                     <div className="bg-[#111] border border-white/10 rounded-xl p-6 max-w-md w-full shadow-2xl">
                         <h3 className="text-lg font-medium text-white mb-4">
-                            {confirmDialog.isRetry ? dict.dashboard.productGrid.retryTitle : dict.dashboard.productGrid.startCollectionTitle}
+                            {confirmDialog.isAiOnly ? dict.dashboard.productGrid.aiOnlyTitle : (confirmDialog.isRetry ? dict.dashboard.productGrid.retryTitle : dict.dashboard.productGrid.startCollectionTitle)}
                         </h3>
 
                         <div className="text-sm text-white/60 space-y-4 mb-6">
-                            {!confirmDialog.isRetry && lastCompletedAt && (
+                            {!confirmDialog.isRetry && !confirmDialog.isAiOnly && lastCompletedAt && (
                                 <div className="p-3 bg-red-500/10 border border-red-500/20 rounded text-red-400">
                                     <strong className="block mb-1">{dict.dashboard.productGrid.recentExecutionDetected}</strong>
                                     {dict.dashboard.productGrid.recentExecutionDesc}{new Date(lastCompletedAt).toLocaleString()}. {dict.dashboard.productGrid.recentExecutionAsk}
                                 </div>
                             )}
 
-                            {!confirmDialog.isRetry ? (
+                            {confirmDialog.isAiOnly ? (
+                                <p>{dict.dashboard.productGrid.aiOnlyDesc}</p>
+                            ) : (!confirmDialog.isRetry ? (
                                 <p>{dict.dashboard.productGrid.freshStartDesc}</p>
                             ) : (
                                 <p>{dict.dashboard.productGrid.retryDesc}</p>
-                            )}
+                            ))}
                             <p className="font-medium text-white/80">{dict.dashboard.productGrid.proceedAsk}</p>
                         </div>
 
                         <div className="flex justify-end gap-3">
                             <button
-                                onClick={() => setConfirmDialog({ isOpen: false, productId: null, isRetry: false })}
+                                onClick={() => setConfirmDialog({ isOpen: false, productId: null, isRetry: false, isAiOnly: false })}
                                 className="px-4 py-2 rounded bg-white/5 hover:bg-white/10 text-white transition-colors text-sm"
                             >
                                 {dict.dashboard.productGrid.cancelBtn}
@@ -195,7 +198,7 @@ export function ProductGrid({ categoryId, products, dict }: { categoryId: string
                                 onClick={confirmRun}
                                 className="px-4 py-2 rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30 transition-colors text-sm font-medium"
                             >
-                                {confirmDialog.isRetry ? dict.dashboard.productGrid.yesRetryBtn : dict.dashboard.productGrid.yesStartFreshBtn}
+                                {confirmDialog.isAiOnly ? dict.dashboard.productGrid.yesAiOnlyBtn : (confirmDialog.isRetry ? dict.dashboard.productGrid.yesRetryBtn : dict.dashboard.productGrid.yesStartFreshBtn)}
                             </button>
                         </div>
                     </div>

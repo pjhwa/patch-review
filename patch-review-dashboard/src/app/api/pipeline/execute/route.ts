@@ -8,7 +8,7 @@ const execAsync = util.promisify(exec);
 export async function POST(request: Request) {
     try {
         const body = await request.json();
-        const { category, productId, isRetry } = body;
+        const { category, productId, isRetry, isAiOnly } = body;
 
         if (category !== 'os') {
             return NextResponse.json({ error: 'Only OS category is supported for execution right now' }, { status: 400 });
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
             } catch (e) { }
         }
 
-        fs.writeFileSync(statusFile, JSON.stringify({ isRunning: true, message: isRetry ? "Starting Retry Data Collection..." : "Starting Data Collection..." }));
+        fs.writeFileSync(statusFile, JSON.stringify({ isRunning: true, message: isAiOnly ? "Starting AI Review Analysis..." : (isRetry ? "Starting Retry Data Collection..." : "Starting Data Collection...") }));
 
         // Archive previous batch data and logs so UI counts reset to 0 cleanly
         if (!isRetry) {
@@ -53,10 +53,9 @@ export async function POST(request: Request) {
                     path.join(linuxSkillDir, `final_approved_patches_${prod}.csv`)
                 );
 
-                const shouldArchive = fs.existsSync(batchDataDir) ||
-                    fs.existsSync(preprocessedFile) ||
-                    fs.existsSync(finalReportFile) ||
-                    approvedFiles.some(f => fs.existsSync(f));
+                const shouldArchive = isAiOnly ?
+                    (fs.existsSync(finalReportFile) || approvedFiles.some(f => fs.existsSync(f))) :
+                    (fs.existsSync(batchDataDir) || fs.existsSync(preprocessedFile) || fs.existsSync(finalReportFile) || approvedFiles.some(f => fs.existsSync(f)));
 
                 if (shouldArchive) {
                     // Create archive dir based on current timestamp
@@ -64,15 +63,18 @@ export async function POST(request: Request) {
                     const archiveDir = path.join(linuxSkillDir, 'archive', timestamp);
                     fs.mkdirSync(archiveDir, { recursive: true });
 
-                    if (fs.existsSync(batchDataDir)) {
-                        fs.renameSync(batchDataDir, path.join(archiveDir, 'batch_data'));
+                    if (!isAiOnly) {
+                        if (fs.existsSync(batchDataDir)) {
+                            fs.renameSync(batchDataDir, path.join(archiveDir, 'batch_data'));
+                        }
+                        if (fs.existsSync(debugLogFile)) {
+                            fs.renameSync(debugLogFile, path.join(archiveDir, 'debug_collector.log'));
+                        }
+                        if (fs.existsSync(preprocessedFile)) {
+                            fs.renameSync(preprocessedFile, path.join(archiveDir, 'patches_for_llm_review.json'));
+                        }
                     }
-                    if (fs.existsSync(debugLogFile)) {
-                        fs.renameSync(debugLogFile, path.join(archiveDir, 'debug_collector.log'));
-                    }
-                    if (fs.existsSync(preprocessedFile)) {
-                        fs.renameSync(preprocessedFile, path.join(archiveDir, 'patches_for_llm_review.json'));
-                    }
+
                     if (fs.existsSync(finalReportFile)) {
                         fs.renameSync(finalReportFile, path.join(archiveDir, 'patch_review_final_report.csv'));
                     }
@@ -113,10 +115,12 @@ export async function POST(request: Request) {
             (async () => {
                 try {
                     const nodePath = path.join(process.env.HOME || '/home/citec', '.nvm/versions/node/v22.22.0/bin/node');
-                    const scraperArgs = isRetry ? ['batch_collector.js', '--retry-failures'] : ['batch_collector.js'];
 
-                    await runStep(nodePath, scraperArgs, isRetry ? 'Retry Data Collection' : 'Data Collection', { cwd: linuxSkillDir });
-                    await runStep('/usr/bin/python3', ['patch_preprocessing.py'], 'Preprocessing', { cwd: linuxSkillDir });
+                    if (!isAiOnly) {
+                        const scraperArgs = isRetry ? ['batch_collector.js', '--retry-failures'] : ['batch_collector.js'];
+                        await runStep(nodePath, scraperArgs, isRetry ? 'Retry Data Collection' : 'Data Collection', { cwd: linuxSkillDir });
+                        await runStep('/usr/bin/python3', ['patch_preprocessing.py'], 'Preprocessing', { cwd: linuxSkillDir });
+                    }
 
                     const openClawPath = '/home/citec/.nvm/versions/node/v22.22.0/bin/node';
                     const openClawScript = '/home/citec/.nvm/versions/node/v22.22.0/bin/openclaw';
@@ -138,6 +142,11 @@ export async function POST(request: Request) {
 
                     await runStep(openClawPath, [openClawScript, 'agent', '--agent', 'main', '--message', aiPrompt], 'AI Analysis', { cwd: linuxSkillDir });
 
+                    const finalReportPath = path.join(linuxSkillDir, 'patch_review_final_report.csv');
+                    if (!fs.existsSync(finalReportPath)) {
+                        throw new Error("외부 LLM 모델이 응답이 없거나 기한 내 최종 리포트를 생성하지 못했습니다. 추후 'AI 리뷰 재작동'을 눌러 해당 단계만 별도로 수행해 주십시오.");
+                    }
+
                     const completedAt = new Date().toISOString();
                     fs.writeFileSync(statusFile, JSON.stringify({ isRunning: false, message: "Pipeline completed successfully.", lastCompletedAt: completedAt }));
                 } catch (e: any) {
@@ -151,7 +160,7 @@ export async function POST(request: Request) {
 
         return NextResponse.json({
             success: true,
-            message: `Started ${isRetry ? 'retry ' : ''}pipeline execution for Linux servers (redhat, oracle, ubuntu)`,
+            message: `Started ${isAiOnly ? 'AI-Only ' : (isRetry ? 'retry ' : '')}pipeline execution for Linux servers`,
             jobId: `job-${Date.now()}`
         });
 

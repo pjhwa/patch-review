@@ -42,7 +42,7 @@ export async function GET(request: Request, props: { params: Promise<{ id: strin
 
         const parsed = Papa.parse(fileContent, { header: true, skipEmptyLines: true });
 
-        let filteredData = [];
+        let filteredData: any[] = [];
         if (parsed.data && Array.isArray(parsed.data)) {
             filteredData = parsed.data.filter((row: any) => {
                 const vendor = row['Vendor'] || row['Vendor ID'] || row['vendor'];
