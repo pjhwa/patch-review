@@ -140,11 +140,45 @@ export async function POST(request: Request) {
                         }
                     }
 
-                    await runStep(openClawPath, [openClawScript, 'agent', '--agent', 'main', '--message', aiPrompt], 'AI Analysis', { cwd: linuxSkillDir });
+                    // AI Analysis with auto-retry (up to 2 additional attempts)
+                    const MAX_AI_RETRIES = 2;
+                    let aiLastError: any = null;
+                    let aiSuccess = false;
 
-                    const finalReportPath = path.join(linuxSkillDir, 'patch_review_ai_report.json');
-                    if (!fs.existsSync(finalReportPath)) {
-                        throw new Error("외부 LLM 모델이 응답이 없거나 기한 내 최종 리포트(JSON)를 생성하지 못했습니다. 추후 'AI 리뷰 재작동'을 눌러 해당 단계만 별도로 수행해 주십시오.");
+                    for (let attempt = 1; attempt <= MAX_AI_RETRIES + 1; attempt++) {
+                        try {
+                            const attemptMsg = attempt > 1 ? ` (재시도 ${attempt - 1}/${MAX_AI_RETRIES})` : '';
+                            fs.writeFileSync(statusFile, JSON.stringify({
+                                isRunning: true,
+                                message: `AI Analysis 진행 중${attemptMsg}... (모델: qwen3-coder → fallback 순서로 자동 전환)`
+                            }));
+
+                            await runStep(openClawPath, [openClawScript, 'agent', '--agent', 'main', '--message', aiPrompt], `AI Analysis (attempt ${attempt})`, { cwd: linuxSkillDir });
+
+                            // Check if the JSON output was actually generated
+                            const finalReportPath = path.join(linuxSkillDir, 'patch_review_ai_report.json');
+                            if (!fs.existsSync(finalReportPath)) {
+                                throw new Error(`LLM이 실행은 완료됐지만 patch_review_ai_report.json 파일을 생성하지 않았습니다 (attempt ${attempt})`);
+                            }
+
+                            aiSuccess = true;
+                            break; // Success — exit retry loop
+                        } catch (retryErr: any) {
+                            aiLastError = retryErr;
+                            console.error(`[AI Analysis] Attempt ${attempt} failed:`, retryErr.message);
+                            if (attempt <= MAX_AI_RETRIES) {
+                                // Wait 5 seconds before retrying
+                                await new Promise(res => setTimeout(res, 5000));
+                            }
+                        }
+                    }
+
+                    if (!aiSuccess) {
+                        throw new Error(
+                            `AI Review가 ${MAX_AI_RETRIES + 1}번 시도 후 모두 실패했습니다. ` +
+                            `마지막 오류: ${aiLastError?.message || '알 수 없는 오류'}. ` +
+                            `나중에 'AI 리뷰만 재시도' 버튼을 눌러 해당 단계만 별도로 수행하세요.`
+                        );
                     }
 
                     const completedAt = new Date().toISOString();
