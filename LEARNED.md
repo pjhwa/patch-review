@@ -73,6 +73,22 @@
 - **문제**: 외부 API 통신(`curl`, `playwright json()`) 후 결과값을 검증 없이 곧바로 `jq .`에 물려주거나 `JSON.parse()`를 시도하다 구문 분석 에러(`Invalid numeric literal`, `Unexpected token 'Q'`) 발생.
 - **교훈**: 방화벽 차단이나 잘못된 파라미터로 인해 원격 서버가 온전한 JSON 형태가 아닌 HTML 오류 페이지나 텍스트를 뱉는 상황이 허다함. 즉각적인 파싱 파이프라인으로 엮기 전에 변수에 값을 일단 저장하고 상태 코드를 검사하거나 눈으로 확인하는 "사전 텍스트 검증 로직"을 추가하여 안전을 도모할 것.
 
+#### 5. 로컬 스크립트 생성 시 PowerShell 기본 인코딩(UTF-16LE) 문제 (에러 7, 10)
+- **문제**: PowerShell에서 `echo '...' > script.sh` 로컬 명령으로 파일을 만든 뒤 `scp`로 전송하면, 원격 리눅스에서 `cannot execute binary file` 혹은 파이썬 `SyntaxError: Non-UTF-8 code starting with '\xff'` 오류가 발생.
+- **교훈**: Windows PowerShell의 기본 출력 파이프 리디렉션(`>`)은 UTF-16LE(BOM 포함) 포맷을 사용하므로 리눅스 스크립트 생태계와 절대 호환되지 않음. 파일 작성은 AI 전용 도구(`write_to_file`)를 사용하거나, 터미널에서 스크립트를 작성해야 한다면 무조건 **원격 SSH 접속 내부에 진입한 뒤 리눅스 자체 쉘에서 `cat << 'EOF' > file.sh`** 방식으로 생성할 것. `dos2unix` 같은 패키지가 실서버에 설치되어 있지 않을 리스크도 회피할 수 있음.
+
+#### 6. 복잡한 페이로드 (JSON / 매개변수) SSH 인라인 전송 금지 (에러 2, 3, 4, 5, 6, 9)
+- **문제**: `curl -d '{"category": "os"}'` 나 `python3 -c "{'key': 'val'}"` 처럼 중괄호(`{}`)와 겹따옴표(`"`)를 띄우는 명령을 PowerShell -> SSH 방향으로 인라인(한 줄) 실행 시, JSON 포맷이 깨지거나 `Unexpected token` 구문 오류 발생.
+- **교훈**: Windows PowerShell은 문자열 내의 `{}` 기호를 내부 변수 블록으로 해석하려 들며, 따옴표의 중첩 파싱 로직이 Bash와 충돌하여 페이로드를 조작해버림. 복잡한 JSON 데이터가 들어가는 `curl`이나 Python One-liner 코드는 **절대로 `ssh user@host "..."` 문자열 중간에 욱여넣지 말 것.** 앞선 교훈(5)처럼 완전히 분리된 구동 가능한 스크립트(`.sh`, `.js`)를 원격망에 파일로 먼저 안착시킨 뒤 호출(Call)하는 방식으로 우회해야 파싱 훼손을 100% 막을 수 있음.
+
+#### 7. 글로벌 NVM 패키지(pm2) 동적 경로 추적 (에러 1)
+- **문제**: `source ~/.bashrc && pm2 restart` 나 하드코딩된 특정 노드 경로(`/v22.22.0/bin/pm2`)를 호출했을 때 `command not found` 발생.
+- **교훈**: 비대화형 SSH에서는 `.bashrc` 로드 명령이 기본적으로 무시됨. 게다가 `pm2` 같은 전역(global) 데몬 패키지가 내가 추정한 노드 버전(`v22.22.0`)이 아니라 다른 버전(`v20.20.0`) 환경에만 종속 설치되어 있을 경우 절대경로 하드코딩 기법도 소용없어짐. NVM 생태계 내에서 특정 바이너리를 안전히 찾으려면 `find ~/.nvm -name 'pm2' -type f -executable | head -n 1 | xargs -I {} {} restart ...` 처럼 **동적으로 실행 파일을 찾아 곧바로 파이프라인으로 연결**하는 기법을 활용할 것.
+
+#### 8. Playwright 빈 URL(Empty String) 네비게이션 크래시 방어 (에러 11)
+- **문제**: `page.goto("")` 처럼 크롤러가 불량한(비어있는) URL 변수를 물고 접속을 시도할 때 `Protocol error (Page.navigate): Cannot navigate to invalid URL` 예외를 뱉으며 워커가 사망.
+- **교훈**: 웹 돔 파서(DOM Parser)나 정규식이 URL을 100% 온전하게 찾아낼 것으로 맹신하지 말 것. Playwright로 `goto()`를 호출하기 전에는 반드시 대상 URL이 `http` 프로토콜을 포함한 유효한 문자열인지 사전에 검사(`if (!url || !url.startsWith("http"))`)하는 입력값 검증(Sanitization) 방어 로직을 필수적으로 장착해야 함.
+
 
 ---
 (이하 이전 기록)
