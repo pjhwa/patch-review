@@ -55,7 +55,7 @@ export async function POST(request: Request) {
 
                 const shouldArchive = isAiOnly ?
                     (fs.existsSync(finalReportFile) || approvedFiles.some(f => fs.existsSync(f))) :
-                    (fs.existsSync(batchDataDir) || fs.existsSync(preprocessedFile) || fs.existsSync(finalReportFile) || approvedFiles.some(f => fs.existsSync(f)));
+                    (fs.existsSync(preprocessedFile) || fs.existsSync(finalReportFile) || approvedFiles.some(f => fs.existsSync(f)));
 
                 if (shouldArchive) {
                     // Create archive dir based on current timestamp
@@ -64,9 +64,6 @@ export async function POST(request: Request) {
                     fs.mkdirSync(archiveDir, { recursive: true });
 
                     if (!isAiOnly) {
-                        if (fs.existsSync(batchDataDir)) {
-                            fs.renameSync(batchDataDir, path.join(archiveDir, 'batch_data'));
-                        }
                         if (fs.existsSync(debugLogFile)) {
                             fs.renameSync(debugLogFile, path.join(archiveDir, 'debug_collector.log'));
                         }
@@ -119,7 +116,9 @@ export async function POST(request: Request) {
                     if (!isAiOnly) {
                         const scraperArgs = isRetry ? ['batch_collector.js', '--retry-failures'] : ['batch_collector.js'];
                         await runStep(nodePath, scraperArgs, isRetry ? 'Retry Data Collection' : 'Data Collection', { cwd: linuxSkillDir });
-                        await runStep('/usr/bin/python3', ['patch_preprocessing.py'], 'Preprocessing', { cwd: linuxSkillDir });
+
+                        // Pass `--days 90` to preprocessing so it only hands the last 3 months of accumulated data to the LLM agent
+                        await runStep('/usr/bin/python3', ['patch_preprocessing.py', '--days', '90'], 'Preprocessing', { cwd: linuxSkillDir });
                     }
 
                     const openClawPath = '/home/citec/.nvm/versions/node/v22.22.0/bin/node';

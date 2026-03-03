@@ -2,8 +2,9 @@ import re
 import csv
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import glob
+import argparse
 
 # NOTE: This script replaces 'perform_llm_review_simulation.py'. 
 # It does NOT perform the review. It performs the mechanical PRE-PROCESSING 
@@ -273,6 +274,13 @@ def is_system_critical(vendor, component, text):
     return False
 
 def preprocess_patches():
+    parser = argparse.ArgumentParser(description="Pre-process collected patches for AI review.")
+    parser.add_argument('--days', type=int, default=90, help="Number of days to look back for analysis.")
+    args = parser.parse_args()
+    
+    cutoff_date = datetime.now() - timedelta(days=args.days)
+    print(f"[PREPROCESS] Filter cutoff: Processing patches strictly newer than {cutoff_date.strftime('%Y-%m-%d')} ({args.days} days)")
+    
     print(f"Loading data from {JSON_DIR}...")
     
     raw_list = []
@@ -304,6 +312,23 @@ def preprocess_patches():
                 if rh_date: date_str = rh_date
                 if not summary:
                     summary = title # Fallback
+            
+            # --- DATE WINDOW FILTERING ---
+            try:
+                # Basic parsing try if formatting matches YYYY-MM-DD or YYYY-MM
+                if len(date_str) == 10:
+                    pub_dt = datetime.strptime(date_str, "%Y-%m-%d")
+                elif len(date_str) == 7:
+                    pub_dt = datetime.strptime(date_str, "%Y-%m")
+                else:
+                    pub_dt = datetime.now() # Fallback for malformed
+                
+                # Check timeframe
+                if pub_dt < cutoff_date:
+                    continue
+            except Exception:
+                # If we absolutely can't parse it, we give it the benefit of the doubt
+                pass
                 
             # --- EXCLUSION FILTERS ---
             # 1. Garbage Data (Empty Content or Known Bad ID)

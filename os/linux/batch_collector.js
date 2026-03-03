@@ -25,8 +25,8 @@ logDebug('--- NEW BATCH COLLECTION RUN ---');
 const OUTPUT_DIR = path.join(__dirname, 'batch_data');
 const UBUNTU_LTS_VERSIONS = ['22.04', '24.04'];
 const MAX_CONCURRENCY = 3;
-const MAX_REDHAT_PAGES = 10;
-const MAX_UBUNTU_PAGES = 30;
+const MAX_REDHAT_PAGES = 50; // Increased to ensure 120+ days coverage
+const MAX_UBUNTU_PAGES = 100; // Increased to ensure 120+ days coverage
 
 // --- GLOBAL RETRY CONFIG ---
 const MAX_GLOBAL_RETRIES = 2;
@@ -66,9 +66,9 @@ function parseDateRange() {
         startDate = new Date(year, qStartMonth - 1, 1);
         console.log(`[CONFIG] Quarter mode: ${args[quarterIdx + 1]}`);
     } else {
-        let lookbackDays = 90;
+        let lookbackDays = 120;
         if (daysIdx !== -1 && args[daysIdx + 1]) {
-            lookbackDays = parseInt(args[daysIdx + 1]) || 90;
+            lookbackDays = parseInt(args[daysIdx + 1]) || 120;
         }
         endDate = new Date();
         endDate.setDate(endDate.getDate() + 1); // Include today
@@ -379,12 +379,29 @@ async function scrapeUbuntuWeb(browser) {
 }
 
 // --- HELPER ---
-async function processInBatches(browser, items, vendorTitle, asyncWorker) {
+async function processInBatches(browser, allItems, vendorTitle, asyncWorker) {
+    // Incremental Skipping Logic
+    const items = allItems.filter(item => {
+        const safeId = item.id ? item.id.replace(/[^a-zA-Z0-9-_]/g, '_') : '';
+        if (!safeId) return true;
+        const filePath = path.join(OUTPUT_DIR, `${safeId}.json`);
+        // If file exists, skip scraping it again
+        if (fs.existsSync(filePath)) {
+            // logDebug(`[SKIP] ${item.id} already exists in ${OUTPUT_DIR}`);
+            return false;
+        }
+        return true;
+    });
+
+    const skippedCount = allItems.length - items.length;
+    console.log(`[BATCH] ${vendorTitle}: Found ${allItems.length} candidates. Skipped ${skippedCount} (already exist). Processing ${items.length} new items...`);
+
+    if (items.length === 0) return false;
+
     const chunks = [];
     for (let i = 0; i < items.length; i += MAX_CONCURRENCY) {
         chunks.push(items.slice(i, i + MAX_CONCURRENCY));
     }
-    console.log(`[BATCH] Processing ${items.length} ${vendorTitle} items...`);
     let count = 0;
     let browserDead = false;
     for (const chunk of chunks) {
