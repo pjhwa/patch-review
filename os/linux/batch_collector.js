@@ -513,24 +513,27 @@ const oracleWorker = async (ctxPage, adv) => {
     }
     await ctxPage.goto(adv.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     const details = await ctxPage.evaluate(() => {
+        let text = '';
         const pre = document.querySelector('pre');
-        if (pre) return { full_text: pre.innerText.trim() };
+        if (pre) {
+            text = pre.innerText.trim();
+        } else {
+            function extractTextWithNewlines(node) {
+                if (node.nodeType === 3) return node.nodeValue || '';
+                if (node.nodeType !== 1) return '';
+                let nodeText = '';
+                const isBlock = /^(DIV|P|H[1-6]|LI|TR|UL|OL|TABLE|BLOCKQUOTE|PRE)$/i.test(node.tagName);
+                for (let child of node.childNodes) nodeText += extractTextWithNewlines(child);
+                if (isBlock) nodeText = '\n' + nodeText + '\n';
+                return nodeText;
+            }
 
-        function extractTextWithNewlines(node) {
-            if (node.nodeType === 3) return node.nodeValue || '';
-            if (node.nodeType !== 1) return '';
-            let text = '';
-            const isBlock = /^(DIV|P|H[1-6]|LI|TR|UL|OL|TABLE|BLOCKQUOTE|PRE)$/i.test(node.tagName);
-            for (let child of node.childNodes) text += extractTextWithNewlines(child);
-            if (isBlock) text = '\n' + text + '\n';
-            return text;
+            text = extractTextWithNewlines(document.body)
+                .replace(/[\t]+/g, ' ')
+                .replace(/ \n /g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
         }
-
-        let text = extractTextWithNewlines(document.body)
-            .replace(/[\t]+/g, ' ')
-            .replace(/ \n /g, '\n')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
 
         // Structured Extraction from Oracle's mailing text
         const detailsObj = {
