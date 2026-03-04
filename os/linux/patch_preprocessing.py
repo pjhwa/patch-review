@@ -360,7 +360,7 @@ def preprocess_patches():
                 has_valid_product = False
                 for prod in affected_products:
                     # Require base OS version (8/9/10) OR SAP Solutions
-                    if re.search(r'Red Hat Enterprise Linux for x86_64\s*(?:[89]|10)\b', prod) or "Update Services for SAP Solutions" in prod:
+                    if re.search(r'Red Hat Enterprise Linux.*?(?:[89]|10)\b', prod) or "Update Services for SAP Solutions" in prod:
                         has_valid_product = True
                         break
                 if not has_valid_product:
