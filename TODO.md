@@ -14,6 +14,9 @@ Mission Control Dashboard에서 영감을 받은 **Patch Review Board** 통합 �
 - [x] **BugFix**: Finalize 로직에서 빈 CSV(헤더만 존재)가 생성되던 이슈 해결. (기존 JSON 대신 최종 AI 결과물인 `patch_review_final_report.csv` 원본을 직접 파싱하게 PapaParse 플러그인 도입 및 로직 교체)
 - [x] **New Feature**: 전역 레이아웃 및 각 기능별 UI 컴포넌트에 대한 완전한 다국어(KOR/ENG) i18n 지원 구현 및 쿠키 기반의 상태 저장 연동 완료.
 
+## 신규 기능 완료내역 (2026-03-11)
+- [x] **New Feature**: `patch_preprocessing.py` 전처리 스크립트 실행 시, 필터링 로직에 의해 누락된 패치들의 정확한 사유를 기록하는 Audit Log (`dropped_patches_audit.csv`) 자동 생성 기능 추가 (신뢰도 검증용 목적).
+
 ## 1. 계획 및 분석 단계 (Planning & Analysis)
 - [x] 요구사항 분석: 각 카테고리/제품별 패치 계층 구조 파악
 - [x] 분기별 스케줄링 및 파이프라인(수집 -> 전처리 -> AI 분석 -> 담당자 검토) 파이프라인 구조화
