@@ -4,6 +4,12 @@
 
 ## 🟣 [2026-03-11] Ceph 파이프라인 구현 - Prisma 스키마 & 빌드 오류 교훈
 
+### stage/[stageId]/route.ts 신규 vendor 매핑 누락 버그
+- **문제**: Ceph 파이프라인 실행 후 "전처리 데이터 추출본"에 RedHat 패치가 표시됨.
+- **원인**: `stage/[stageId]/route.ts`에 OS 제품(redhat/oracle/ubuntu)의 `productId → vendor` 매핑만 있고, `'ceph' → 'Ceph'` 케이스가 없어 `targetVendor === undefined`가 됨. 결과적으로 `WHERE` 절 없이 모든 벤더 데이터를 전부 반환.
+- **해결**: `else if (productId === 'ceph') targetVendor = 'Ceph';` 한 줄 추가.
+- **교훈**: **새 카테고리/제품 파이프라인 추가 시 `stage/[stageId]/route.ts`의 productId→vendor 매핑 테이블도 반드시 함께 업데이트해야 한다.** 이를 빠뜨리면 silent data leak(다른 벤더의 데이터가 섞여서 출력됨)이 발생. 체크리스트에 이 항목을 필수 항목으로 추가할 것.
+
 ### Prisma upsert Where 절 오류
 - **문제**: 새 파이프라인에서 `PreprocessedPatch` 테이블에 upsert를 시도했지만 빌드 에러 발생.
   - 에러: `Type '{ issueId: any; }' is not assignable to type 'PreprocessedPatchWhereUniqueInput'`
