@@ -16,6 +16,7 @@ Mission Control Dashboard에서 영감을 받은 **Patch Review Board** 통합 �
 
 ## 신규 기능 완료내역 (2026-03-11)
 - [x] **New Feature**: `patch_preprocessing.py` 전처리 스크립트 실행 시, 필터링 로직에 의해 누락된 패치들의 정확한 사유를 기록하는 Audit Log (`dropped_patches_audit.csv`) 자동 생성 기능 추가 (신뢰도 검증용 목적).
+- [x] **BugFix**: `patch_preprocessing.py` 전처리 스크립트 실행 시 패치 개수가 1~2개씩 미세하게 요동치는 비결정론(Nondeterministic) 버그 해결. (Python의 `set()` 해시 무작위성과 `glob` 결과물 정렬 부재를 `sorted()`로 감싸 보완함)
 
 ## 1. 계획 및 분석 단계 (Planning & Analysis)
 - [x] 요구사항 분석: 각 카테고리/제품별 패치 계층 구조 파악
