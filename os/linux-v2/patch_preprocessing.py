@@ -3,6 +3,8 @@ import csv
 import os
 import json
 from datetime import datetime, timedelta
+import sqlite3
+import uuid
 import glob
 import argparse
 
@@ -465,6 +467,36 @@ def preprocess_patches():
         json.dump(final_candidates, f, indent=2, ensure_ascii=False)
         
     print(f"Saved review packet to {OUTPUT_FILE}")
+
+    # --- Step 4: Save to SQLite Database ---
+    db_path = os.path.expanduser("~/patch-review-dashboard-v2/patch-review.db")
+    if os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(db_path, timeout=20.0)
+            cursor = conn.cursor()
+            run_id = str(uuid.uuid4())
+
+            for p in final_candidates:
+                cursor.execute('''
+                    INSERT INTO PreprocessedPatch (id, vendor, issueId, component, version, description, isReviewed, pipelineRunId, collectedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                ''', (
+                    str(uuid.uuid4()),
+                    p.get('vendor', 'Unknown'),
+                    p.get('id', 'Unknown'),
+                    p.get('component', 'Unknown'),
+                    p.get('specific_version', 'Unknown'),
+                    p.get('diff_content', ''),
+                    False,
+                    run_id
+                ))
+            conn.commit()
+            conn.close()
+            print(f"[DB SUCCESS] Inserted {len(final_candidates)} into PreprocessedPatch (RunID: {run_id})")
+        except Exception as e:
+            print(f"[DB ERROR] SQLite insertion failed: {e}")
+    else:
+        print("[DB WARNING] SQLite database not found. Skipping DB insertion.")
 
 if __name__ == "__main__":
     preprocess_patches()

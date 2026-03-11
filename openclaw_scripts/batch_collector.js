@@ -250,7 +250,23 @@ async function scrapeRedHat(browser) {
                 }
                 extractProducts(csaf.product_tree?.branches);
 
-                const full_text = [title, overview, description, ...cve_details].join('\n\n').slice(0, 6000);
+                // Fetch the Errata HTML to get the Updated Packages list (RPMs)
+                let rpmListText = '';
+                try {
+                    const errataRes = await httpsGet(ref_url);
+                    if (errataRes.status === 200) {
+                        const rpmMatches = errataRes.body.match(/[\w.-]+\.rpm/g);
+                        if (rpmMatches) {
+                            // Filter out duplicates and keep only actual RPM names
+                            const uniqueRpms = [...new Set(rpmMatches)].filter(rpm => rpm.length > 5);
+                            rpmListText = "Updated Packages:\n" + uniqueRpms.join('\n');
+                        }
+                    }
+                } catch (e) {
+                    logDebug(`[PROCESS FAIL] Failed to fetch RPMs for ${id}: ${e.message}`);
+                }
+
+                const full_text = [title, overview, description, rpmListText, ...cve_details].join('\n\n').slice(0, 7000);
 
                 saveAdvisory(safeId, {
                     id, vendor: 'Red Hat',

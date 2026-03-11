@@ -1,0 +1,7 @@
+{
+    "providers": [
+        "rhel"
+    ],
+    "isRetry": false,
+    "isAiOnly": true
+}

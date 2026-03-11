@@ -3,6 +3,8 @@ import csv
 import os
 import json
 from datetime import datetime, timedelta
+import sqlite3
+import uuid
 import glob
 import argparse
 
@@ -10,14 +12,14 @@ import argparse
 # It does NOT perform the review. It performs the mechanical PRE-PROCESSING 
 # (Collection, Pruning, Aggregation) to prepare a clean dataset for the AI Agent (LLM) to review.
 
-JSON_DIR = r"batch_data"
+JSON_DIRS = [os.path.join("redhat", "redhat_data"), os.path.join("oracle", "oracle_data"), os.path.join("ubuntu", "ubuntu_data")]
 OUTPUT_FILE = "patches_for_llm_review.json"
 
 # --- CONFIGURATION: PRUNING RULES ---
 # STRICT WHITELIST: ONLY components capable of causing "System Critical" failures.
 SYSTEM_CORE_COMPONENTS = [
     # 1. Kernel & Hardware Interaction
-    "kernel", "linux-image", "microcode", "linux-firmware", 
+    "kernel", "linux-image", "microcode", "microcode_ctl", "linux-firmware", 
     "shim", "grub", "grub2", "efibootmgr", "mokutil",
     
     # 2. Storage & Filesystem
@@ -116,10 +118,59 @@ def extract_redhat_date(text):
 
 def extract_redhat_content(text):
     """Clean Red Hat boilerplate and extract Description/Topic/Fixes"""
-    # CSAF payload from batch_collector.js is already clean JSON text (title + overview + description + cves).
-    # We no longer need to parse HTML DOM headers like "Skip to content" or "Solution".
-    # Return up to 4000 chars to give LLM maximum context without overflowing.
     return text[:4000].strip()
+
+def format_redhat_os_versions(affected_products):
+    if not affected_products: return ""
+    versions = set()
+    sap_versions = set()
+    for prod in affected_products:
+        m = re.search(r'\(v\.([\d.]+)\)', prod)
+        if m:
+            ver = m.group(1)
+        else:
+            m_base = re.search(r'Red Hat Enterprise Linux.*?\b([89]|10)(?:\.\d+)?\b', prod)
+            if m_base:
+                ver = m_base.group(1)
+            else:
+                continue
+        
+        if 'SAP' in prod or 'E4S' in prod:
+            sap_versions.add(ver)
+        elif 'EUS' in prod or 'Extended Update Support' in prod or ' AUS ' in prod or '- AUS' in prod or 'Advanced Mission Critical' in prod or 'TUS ' in prod or 'Telco' in prod or 'Advanced Update Support' in prod:
+            sap_versions.add(f"EUS {ver}")
+        else:
+            versions.add(ver.split('.')[0])
+            
+    extracted = []
+    has_generic_8 = any(v == '8' for v in versions)
+    has_generic_9 = any(v == '9' for v in versions)
+    has_generic_10 = any(v == '10' for v in versions)
+    
+    if has_generic_8: extracted.append("RHEL 8")
+    if has_generic_9: extracted.append("RHEL 9")
+    if has_generic_10: extracted.append("RHEL 10")
+    
+    for sv in sap_versions:
+        major = sv.split('.')[-1] if ' ' in sv else sv.split('.')[0] 
+        base_major = sv.split(' ')[-1].split('.')[0] if ' ' in sv else major
+        if (base_major == '8' and has_generic_8) or (base_major == '9' and has_generic_9) or (base_major == '10' and has_generic_10):
+            continue
+        prefix = "RHEL EUS" if "EUS" in sv else "RHEL for SAP Solution"
+        ver_num = sv.split(' ')[-1] if "EUS" in sv else sv
+        extracted.append(f"{prefix} {ver_num}")
+        
+    for v in versions:
+        if v not in ['8', '9', '10']:
+            major = v.split('.')[0]
+            if (major == '8' and has_generic_8) or (major == '9' and has_generic_9) or (major == '10' and has_generic_10):
+                continue
+            extracted.append(f"RHEL {v}")
+            
+    if not extracted:
+        return "RHEL"
+        
+    return ", ".join(sorted(set(extracted)))
 
 def extract_diff_content(text, vendor):
     """Extracts relevant 'diff' content (changes) from full text"""
@@ -150,12 +201,68 @@ def extract_diff_content(text, vendor):
     # Default: Return cleanedsummary/synopsis
     return text[:500] + "..." if len(text) > 500 else text
 
-def get_component_name(vendor, title, summary, full_text):
+def extract_base_component(pkgs):
+    arch_exts = ['.x86_64', '.aarch64', '.src', '.noarch', '.i686', '.s390x', '.ppc64le']
+    names = []
+    for pkg in pkgs:
+        stripped = str(pkg)
+        for ext in arch_exts:
+            if stripped.endswith(ext):
+                stripped = stripped[:-len(ext)]
+                break
+        
+        m = re.match(r'^([a-zA-Z0-9_+-]+?)-([\d][a-zA-Z0-9_+.:-]+)$', stripped)
+        if m:
+            names.append(m.group(1))
+        else:
+            m2 = re.match(r'^([a-zA-Z0-9_+-]+?)[-_]([\d][a-zA-Z0-9_+.:~-]+)$', stripped)
+            if m2:
+                names.append(m2.group(1))
+    
+    if not names:
+        return None
+        
+    names = list(set(names))
+    names.sort(key=len)
+    
+    for pkg in pkgs:
+        if str(pkg).endswith('.src'):
+            stripped = str(pkg)[:-4]
+            m = re.match(r'^([a-zA-Z0-9_+-]+?)-([\d][a-zA-Z0-9_+.:-]+)$', stripped)
+            if m:
+                return m.group(1)
+                
+    return names[0]
+
+def get_component_name(vendor, title, summary, full_text, pkgs=None):
+    if pkgs and isinstance(pkgs, list) and len(pkgs) > 0:
+        base_comp = extract_base_component(pkgs)
+        if base_comp:
+            if vendor == "Oracle" and "uek" in base_comp:
+                version_match = re.search(r'(\d+\.\d+)\.\d+', title + " " + summary)
+                if not version_match:
+                    version_match = re.search(r'(\d+\.\d+)\.\d+', full_text)
+                kern_series = f"-v{version_match.group(1)}" if version_match else ""
+                return f"kernel-uek{kern_series}"
+            
+            for core in SYSTEM_CORE_COMPONENTS:
+                if core == base_comp or base_comp.startswith(core + "-"):
+                    return core
+            return base_comp
     text = (title + " " + summary + " " + full_text).lower()
     text_primary = (title + " " + summary).lower()
     
-    # 1. Oracle Special Case: UEK + Versioning
+    # 1. Oracle Special Case: Exact Parsing from Synopsis
     if vendor == "Oracle":
+        m = re.search(r'Oracle Linux \d+ ([\w-]+)\s', title + " " + summary)
+        if m:
+            comp = m.group(1)
+            if "Unbreakable" in comp or "kernel" in comp:
+                comp = "kernel-uek"
+            elif "microcode" in comp:
+                comp = "microcode_ctl"
+            return comp
+            
         if "uek" in text_primary or "unbreakable enterprise kernel" in text_primary:
             comp = "kernel-uek"
             
@@ -196,30 +303,54 @@ def get_component_name(vendor, title, summary, full_text):
         
     return "other"
 
-def extract_specific_version(text, component, patch_id=None):
-    """Extracts exact version number if possible (e.g. 5.4.17-...)"""
-    # User Overrides & Manual Lookups
-    overrides = {
-        "RHSA-2026:1815": "openssh-8.7p1-30.el9_2.9",
-        "RHSA-2026:2594": "kernel-5.14.0-427.110.1.el9_4", # Src RPM
-        "RHSA-2026:2486": "fence-agents-4.2.1-89.el8_6.21", 
-        "RHSA-2026:1733": "openssl-3.0.1-46.el9_0.7", # Minimum version
-        "RHSA-2026:2484": "pcs-0.10.11", # Advisory updates 'pcs', specific version varies, using generic base
-        "RHSA-2026:2572": "rhacm-2.14-images", # Container images, no single RPM
-        "RHSA-2026:2520": "toolbox-0.0.99.5.1-2.el9_4"
-    }
+def get_best_rpm_match(pkgs, comp):
+    arch_exts = ['.x86_64', '.aarch64', '.src', '.noarch', '.i686', '.s390x', '.ppc64le']
+    best_ver = ""
+    # pass 1: exact match
+    for pkg in pkgs:
+        stripped = pkg
+        for ext in arch_exts:
+            if stripped.endswith(ext):
+                stripped = stripped[:-len(ext)]
+                break
+        
+        m = re.match(r'^([a-zA-Z0-9_+-]+?)-([\d][a-zA-Z0-9_+.:-]+)$', stripped)
+        if m:
+            name, ver = m.group(1), m.group(2)
+            if name == comp or (comp == "kernel-uek" and name == "kernel-uek"):
+                return f"{name}-{ver}"
     
-    if patch_id in overrides:
-        return overrides[patch_id]
-
-    # Heuristic for kernel versions
-    if "kernel" in component:
-        m = re.search(r'(\d+\.\d+\.\d+-\d+(\.\d+)*(\.el\d+uek)?)', text)
-        if m: return m.group(1)
-    return ""
+    # pass 2: prefix match
+    for pkg in pkgs:
+        stripped = pkg
+        for ext in arch_exts:
+            if stripped.endswith(ext):
+                stripped = stripped[:-len(ext)]
+                break
+                
+        m = re.match(r'^([a-zA-Z0-9_+-]+?)-([\d][a-zA-Z0-9_+.:-]+)$', stripped)
+        if m:
+            name, ver = m.group(1), m.group(2)
+            if name.startswith(comp) or comp in name:
+                return f"{name}-{ver}"
+                
+    # pass 3: just return the first one stripped
+    if pkgs:
+        stripped = str(pkgs[0])
+        for ext in arch_exts:
+            if stripped.endswith(ext):
+                stripped = stripped[:-len(ext)]
+                break
+        m = re.match(r'^([a-zA-Z0-9_+-]+?)-([\d][a-zA-Z0-9_+.:-]+)$', stripped)
+        if m:
+            return f"{m.group(1)}-{m.group(2)}"
+        return stripped
+    return best_ver
 
 def is_system_critical(vendor, component, text):
     comp = component.lower()
+    
+    if "ovirt 4.5" in text.lower(): return False
     
     # Rule 2: Strict Whitelist (RHEL/Ubuntu/Oracle)
     for bad in EXCLUDED_PACKAGES_EXPLICIT:
@@ -228,7 +359,6 @@ def is_system_critical(vendor, component, text):
     for core in SYSTEM_CORE_COMPONENTS:
         if core == comp: return True
         if comp.startswith(f"{core}-"): return True
-        if f"package {core}" in text.lower(): return True
 
     if "kernel" in comp and "texlive" not in comp: return True
     return False
@@ -241,12 +371,15 @@ def preprocess_patches():
     cutoff_date = datetime.now() - timedelta(days=args.days)
     print(f"[PREPROCESS] Filter cutoff: Processing patches strictly newer than {cutoff_date.strftime('%Y-%m-%d')} ({args.days} days)")
     
-    print(f"Loading data from {JSON_DIR}...")
+    print("Loading data from directories...")
     
     raw_list = []
     
     # --- Step 1: Ingest JSONs directly ---
-    json_files = glob.glob(os.path.join(JSON_DIR, "*.json"))
+    json_files = []
+    for d in JSON_DIRS:
+        if os.path.isdir(d):
+            json_files.extend(glob.glob(os.path.join(d, "*.json")))
     print(f"Found {len(json_files)} JSON files.")
 
     for json_path in json_files:
@@ -259,6 +392,8 @@ def preprocess_patches():
                 continue
                 
             vendor = data.get('vendor', 'Unknown')
+            if 'Ubuntu' in vendor:
+                vendor = 'Ubuntu'
             patch_id = data.get('id', os.path.basename(json_path).replace('.json', ''))
             
             # Normalization
@@ -266,7 +401,19 @@ def preprocess_patches():
             date_str = parse_date(date_raw)
             
             title = data.get('title', '')
-            summary = data.get('synopsis', '')
+            
+            synp = data.get('synopsis', '').strip()
+            over = data.get('overview', '').strip()
+            desc = data.get('description', '').strip()
+            
+            # Intelligently combine description text for the UI
+            parts = []
+            if synp: parts.append(synp)
+            if over and over != synp: parts.append(over)
+            if desc and desc not in (over, synp): parts.append(desc)
+            
+            summary = "\n\n".join(parts)
+            
             full_text = data.get('full_text', '') 
             severity = data.get('severity', '')
             affected_products = data.get('affected_products', [])
@@ -306,7 +453,7 @@ def preprocess_patches():
                 continue
             if "rhel 7" in title.lower() and vendor == "Red Hat":
                 continue
-            if (len(full_text) < 50 and vendor == "Red Hat") or patch_id == "RHSA-2026:2664":
+            if (len(full_text) < 50 and vendor == "Red Hat") or patch_id in ["RHSA-2026:2664", "RHSA-2025:23032", "RHSA-2025:23030"]:
                 continue
             
             # 2. Granular Severity Rule (Keep Critical/Important/None, Drop Moderate/Low)
@@ -316,14 +463,62 @@ def preprocess_patches():
                     continue
 
             # 3. Red Hat Specific Product Validation
-            if vendor == "Red Hat" and isinstance(affected_products, list) and len(affected_products) > 0:
+            if vendor == "Red Hat":
+                if not isinstance(affected_products, list) or len(affected_products) == 0:
+                    continue
+                is_rhba = "RHBA" in patch_id
+                is_rhsa = "RHSA" in patch_id
                 has_valid_product = False
+                
+                rhba_patterns = [
+                    r'Red Hat Enterprise Linux for x86_64 (?:8|9|10)(?:\.\d+)? x86_64',
+                    r'Red Hat Enterprise Linux High Availability for x86_64 (?:8|9|10)(?:\.\d+)? x86_64',
+                    r'Red Hat Enterprise Linux for x86_64 - Update Services for SAP Solutions (?:8|9|10)(?:\.\d+)? x86_64'
+                ]
+                
+                rhsa_patterns = [
+                    r'Red Hat Enterprise Linux BaseOS \(v\.\s?(?:8|9|10)(?:\.\d+)?\)',
+                    r'Red Hat Enterprise Linux AppStream \(v\.\s?(?:8|9|10)(?:\.\d+)?\)',
+                    r'Red Hat Enterprise Linux High\s?Availability \(v\.\s?(?:8|9|10)(?:\.\d+)?\)'
+                ]
+                
                 for prod in affected_products:
-                    # Require base OS version (8/9/10) OR SAP Solutions
-                    if re.search(r'Red Hat Enterprise Linux.*?(?:[89]|10)\b', prod) or "Update Services for SAP Solutions" in prod:
+                    matched = False
+                    if is_rhba:
+                        for pat in rhba_patterns:
+                            if re.search(pat, prod):
+                                matched = True
+                                break
+                    elif is_rhsa:
+                        for pat in rhsa_patterns:
+                            if re.search(pat, prod):
+                                matched = True
+                                break
+                    else:
+                        for pat in rhba_patterns + rhsa_patterns:
+                            if re.search(pat, prod):
+                                matched = True
+                                break
+                    
+                    if matched:
                         has_valid_product = True
                         break
+                        
                 if not has_valid_product:
+                    continue
+                
+            # 3.1. Oracle Architecture Filtering
+            if vendor == "Oracle":
+                arch_valid = False
+                if isinstance(affected_products, list):
+                    for prod in affected_products:
+                        if "x86_64" in prod.lower():
+                            arch_valid = True
+                            break
+                if not arch_valid and "x86_64" in full_text.lower():
+                    arch_valid = True
+                    
+                if not arch_valid:
                     continue
                 
             # 4. Ubuntu Variant Exclusions
@@ -335,8 +530,32 @@ def preprocess_patches():
             if "real time" in title.lower() or "kernel-rt" in title.lower() or "kernel-rt" in summary.lower():
                 continue
             
-            component = get_component_name(vendor, title, summary, full_text)
-            specific_ver = extract_specific_version(full_text, component, patch_id)
+            component = get_component_name(vendor, title, summary, full_text, data.get("packages", []))
+            
+            specific_ver = ""
+            if vendor == "Ubuntu" and isinstance(data.get("packages"), list) and data["packages"]:
+                for pkg in data["packages"]:
+                    pkg_str = str(pkg)
+                    if pkg_str.startswith(component):
+                        m = re.match(fr'{re.escape(component)}[-_](.+)', pkg_str)
+                        if m:
+                            specific_ver = m.group(1)
+                            break
+                if not specific_ver:
+                    specific_ver = str(data["packages"][0])
+
+            if not specific_ver and vendor == "Red Hat":
+                m_title = re.search(r'([\d]+\.[\d]+\.[\d]+)', title)
+                if m_title and "Update" in title:
+                    specific_ver = f"{component}-{m_title.group(1)}"
+                if not specific_ver and "packages" in data and isinstance(data["packages"], list):
+                    best = get_best_rpm_match(data["packages"], component)
+                    if best: specific_ver = best
+                
+                
+            if not specific_ver and vendor == "Oracle" and "packages" in data and isinstance(data["packages"], list):
+                best = get_best_rpm_match(data["packages"], component)
+                if best: specific_ver = best
             
             # Extract diff content for history/summary
             diff_content = extract_diff_content(full_text, vendor)
@@ -344,68 +563,46 @@ def preprocess_patches():
 
             # --- DIST VERSION EXTRACTION & SPLITTING ---
             dist_versions = []
+            os_version_val = "Unknown"
+            
+            search_text = ""
+            if isinstance(affected_products, list):
+                search_text = " ".join([str(p) for p in affected_products])
+            elif isinstance(affected_products, str):
+                search_text = affected_products
+
             if vendor == "Ubuntu":
-                # Find all "XX.XX LTS" patterns and filter out EOL versions
-                lts_matches = re.findall(r"(\d{2}\.\d{2} LTS)", full_text + " " + title)
+                # Find all "XX.XX LTS" patterns strictly from affected_products
+                lts_matches = re.findall(r"(\d{2}\.\d{2} LTS)", search_text)
                 if lts_matches:
                     active_lts = [v for v in sorted(set(lts_matches)) if v not in UBUNTU_EOL_LTS_VERSIONS]
                     dist_versions = active_lts
-                # Non-LTS versions (25.10, etc.) are intentionally NOT included (not supported)
+                    os_version_val = ", ".join(active_lts)
             
             elif vendor == "Oracle":
-                # Extracted in get_component_name, but let's formalize here
-                ol_ver = extract_oracle_version(full_text + " " + title) # e.g. "ol9"
-                if ol_ver:
-                    dist_versions = [ol_ver.replace("ol", "")] # "9"
+                ol_matches = re.findall(r'Oracle Linux (\d+)', search_text, re.IGNORECASE)
+                if ol_matches:
+                    ol_vers = sorted(set(ol_matches))
+                    os_version_val = ", ".join([f"OL{v}" for v in ol_vers])
             
             elif vendor == "Red Hat":
-                # Look for "Red Hat Enterprise Linux X"
-                rhel_matches = re.findall(r"Red Hat Enterprise Linux (\d+)", full_text)
-                if rhel_matches:
-                    dist_versions = sorted(list(set(rhel_matches)))
-            
-            if not dist_versions:
-                dist_versions = ["Unknown"]
+                os_version_val = format_redhat_os_versions(data.get('affected_products', []))
 
-            # Log if we are splitting
-            if len(dist_versions) > 1:
-                print(f"Splitting {patch_id} into versions: {dist_versions}")
-
-            for dist_ver in dist_versions:
-                # Create a specific ID for this split if multiple
-                unique_id = patch_id
-                if len(dist_versions) > 1:
-                    unique_id = f"{patch_id}-{dist_ver.replace(' ','_')}"
-                
-                # Re-extract component/version specific to this dist_ver context if possible
-                # (For now, we use the global extraction but hint the Agent)
-                
-                # Attempt to extract detection specific to this Dist Version if provided
-                target_specific_ver = specific_ver
-                
-                if vendor == "Ubuntu":
-                   # Try to find the table row: "24.04 LTS noble runc – 1.3.3-..."
-                   # Regex look for: {dist_ver} ... {component} – {version}
-                   # escape dots in dist_ver
-                   safe_ver = re.escape(dist_ver)
-                   # Matches line like: "24.04 LTS noble runc – 1.3.3..."
-                   row_match = re.search(fr"{safe_ver}.*?{component}\s+[–-]\s+([^\s]+)", full_text, re.IGNORECASE)
-                   if row_match:
-                       target_specific_ver = row_match.group(1)
-
-                raw_list.append({
-                    'id': unique_id,
-                    'original_id': patch_id,
-                    'vendor': vendor,
-                    'dist_version': dist_ver,
-                    'date': date_str,
-                    'component': component,
-                    'specific_version': target_specific_ver,
-                    'summary': summary,
-                    'diff_content': diff_content, 
-                    'full_text': full_text + " " + title,
-                    'ref_url': data.get('url', '')
-                })
+            raw_list.append({
+                'id': patch_id,
+                'original_id': patch_id,
+                'vendor': vendor,
+                'dist_version': dist_versions[0] if dist_versions else os_version_val,
+                'os_version': os_version_val,
+                'date': date_str,
+                'component': component,
+                'specific_version': specific_ver,
+                'summary': summary,
+                'severity': data.get('severity', ''),
+                'diff_content': diff_content, 
+                'full_text': full_text + " " + title,
+                'ref_url': data.get('url', '')
+            })
 
         except Exception as e:
             print(f"Error reading {json_path}: {e}")
@@ -465,6 +662,56 @@ def preprocess_patches():
         json.dump(final_candidates, f, indent=2, ensure_ascii=False)
         
     print(f"Saved review packet to {OUTPUT_FILE}")
+
+    # --- Step 4: Save to SQLite Database (Incremental: skip already-existing issueIds) ---
+    db_path = os.path.expanduser("~/patch-review-dashboard-v2/prisma/patch-review.db")
+    if os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(db_path, timeout=20.0)
+            cursor = conn.cursor()
+            run_id = str(uuid.uuid4())
+            inserted = 0
+            skipped = 0
+
+            # Fetch the set of already-stored issueIds to avoid duplicates
+            cursor.execute('SELECT issueId FROM PreprocessedPatch')
+            existing_ids = {row[0] for row in cursor.fetchall()}
+
+            for p in final_candidates:
+                issue_id = p.get('id', 'Unknown')
+                if issue_id in existing_ids:
+                    skipped += 1
+                    continue
+
+                version_str = p.get('specific_version', '') or 'Unknown'
+                os_version_str = p.get('os_version', '') or 'Unknown'
+                cursor.execute('''
+                    INSERT INTO PreprocessedPatch
+                      (id, vendor, issueId, osVersion, component, version, severity, releaseDate, description, url, isReviewed, pipelineRunId, collectedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                ''', (
+                    str(uuid.uuid4()),
+                    p.get('vendor', 'Unknown'),
+                    issue_id,
+                    os_version_str,
+                    p.get('component', 'Unknown'),
+                    version_str,
+                    p.get('severity', ''),
+                    p.get('date', ''),
+                    p.get('summary', ''),
+                    p.get('ref_url', ''),
+                    False,
+                    run_id
+                ))
+                inserted += 1
+
+            conn.commit()
+            conn.close()
+            print(f"[DB SUCCESS] Inserted {inserted} new, skipped {skipped} duplicates into PreprocessedPatch (RunID: {run_id})")
+        except Exception as e:
+            print(f"[DB ERROR] SQLite insertion failed: {e}")
+    else:
+        print("[DB WARNING] SQLite database not found. Skipping DB insertion.")
 
 if __name__ == "__main__":
     preprocess_patches()
