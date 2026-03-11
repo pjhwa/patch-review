@@ -11,10 +11,25 @@
   2. **[NVM 템플릿 필수 사용]**: `.nvm/nvm.sh` 로핑 없이 원격 노드 생태계(`npm`, `npx`, `node`, `pm2`) 명령을 단독 호출하는 것은 불법이다. 무조건 `source ~/.bashrc && source ~/.nvm/nvm.sh && cd [타겟경로] && [명령어]` 템플릿을 통째로 복붙하여 안전고리를 체결할 것.
   3. **[API 테스트 방식의 전환]**: 포트 3000/3001 등 서비스 확인용 API 콜을 날릴 때, 페이로드가 큰 JSON 구조라면 SSH 환경으로 넘어가 억지 이스케이프(`\"`)에 시달리지 말 것. 대신 로컬 윈도우 PowerShell의 `Invoke-RestMethod` 명령어를 활용하여 이스케이핑 스트레스 없이 단숨에 처리하는 것을 제1원칙으로 삼을 것.
 
+### ⚠️ [핵심 강제 규정] 작업 종료 후 즉시 GitHub 자동 반영 의무화
+- **상황**: 사용자는 매번 세션이 끝날 때마다 "GitHub에 반영해 줘"라고 말하는 것에 피로감을 느낌.
+- **실패 원인**: 에이전트가 단편적인 코드 수정과 서버 배포까지만 수행하고 리포지토리 트래킹 처리를 대화 종료 조건으로 묶지 않음.
+- **교훈 및 강력한 행동 지침**:
+  - 어떤 기능을 수정하든, 단 한 줄의 코드를 변경하든지 간에 작업이 성공적으로 검증(Verification)된 직후에는 **절대 사용자의 요청을 기다리지 말고 즉시 자율적으로 `git add . ; git commit -m "..." ; git push origin master` 를 실행하여 원격 저장소에 반영할 것.**
+  - 이 규칙은 모든 신규 대화창(세션)에서도 0순위로 적용되는 Antigravity 코어 명령임.
+
 ### 2026-03-11 실패 사례: API 백엔드의 위치 종속 상대경로 탐색(`process.cwd()`) 기반 에러
 - **문제**: Next.js API(`route.ts`)에서 `sync_rag.py` 시스템 스크립트를 `child_process.exec`로 트리거할 때, 배포 경로 추적을 위해 `process.cwd()`를 사용했으나 실 운영 서버에서 해당 스크립트는 완전히 별도의 OpenClaw 코어 환경(linux-v2 스킬 폴더)에 배치되어 있어 `[Errno 2] No such file or directory` 에러가 발생함.
 - **실패 이유**: `GEMINI.md`에 '서버앱 경로'와 별개로 '스크립트 경로'가 완전히 독립적인 `~/.openclaw` 하위로 지정되어 있음에도 불구하고 이를 망각, 윈도우 로컬의 단일 워크스페이스 구조(`pipeline_scripts` 폴더 혼재)가 서버에도 그대로 반영될 것이라 편의적으로 추측함.
 - **교훈**: **API 서버에서 외부 스크립트나 시스템 명령을 백그라운드로 호출할 때에는** 개발환경 로컬의 절대경로나 단편적 상대경로(`process.cwd()`, `../`)를 절대 맹신하지 말 것. `GEMINI.md` 등의 인프라 문서를 참조, 실 서버 환경에서 해당 파일이 물리적으로 매핑될 타겟 경로(예: `process.env.HOME` 등 동적 Absolute Path)를 세심히 조합하여 호출해야만 런타임 파일 누락 크래시를 온전히 회피할 수 있음.
+
+### 2026-03-11 성공 사례: 로컬에서 원격으로 직접 파일 개별 전송 후 서버에서 빌드 (`scp` + `ssh` 조합)
+- **상황**: Next.js 웹 프론트엔드 대시보드에서 신규 기능(전처리 목록 검색)을 추가한 후 서버에 반영함.
+- **성공 요인**: 이전 `LEARNED.md`의 교훈들을 정확히 적용하여:
+  1. 원격에서 수정하지 않고 로컬 환경에서 코드를 작성한 후, `scp src/.../ClientPage.tsx citec@172.16.10.237:/tmp/...` 로 임시 전송.
+  2. `ssh citec@... "mv /tmp/... /home/citec/.../ClientPage.tsx"` 파이프라인으로 안전하게 덮어쓰기.
+  3. 로컬 윈도우쉘에서 `npm run build`를 구사하는 우를 범하지 않고, 전송 직후 곧바로 `ssh citec@... "source ~/.bashrc && source ~/.nvm/nvm.sh && cd ... && npm run build && npx pm2 restart all"` 템플릿을 차용하여 단 한 번의 스크립트 에러 없이 배포를 완료함.
+- **결론**: 안전한 `scp`를 통한 파일 이동 방식과, 원격 `ssh` 인라인 환경 변수 로딩의 시너지가 입증되었으므로 현재의 배포 Workflow를 변동 없이 유지할 것.
 
 ## Google Antigravity 개발 중 주요 교훈 모음
 
@@ -25,7 +40,7 @@
 ### 2026-02-27 실패 사례: 원격 서버(tom26) 배포 중 Git 연결 부재 처리 방식
 - **문제**: 수정된 로컬 코드를 실서버(`tom26`)에 반영하기 위해 `ssh <host> "git pull"`을 시도했으나, 원격 환경에 origin 추적 정보가 설정되어 있지 않아 `fatal: 'origin' does not appear to be a git repository` 오류가 발생함.
 - **실패 이유**: 로컬에는 Git 환경이 잘 구축되어 있었지만, 배포 타겟인 원격 서버 디렉토리는 그저 파일만 복사된 상태였으며 Git Tracking이 잡혀있지 않았음.
-- **교훈**: 원격 서버의 Git 환경에 대한 100% 확신이 없다면 억지로 SSH 상에서 Git을 구성하려고 낭비하기보다, **`scp -r` 명령어를 활용하여 로컬에서 원격으로 직접 폴더를 동기화 전달**하는 것이 빠르고 안전하며 확실한 배포 수단임을 잊지 말 것.
+- **교훈**: 원격 서버의 Git 환경에 대한 100% 확신이 없다면 억지로 SSH 상에서 Git을 구성하려고 낭비하기보다, **`scp -r` 명령어를 활용하여 로컬에서 원격으로 직접 폴더 동기화 전달**하는 것이 빠르고 안전하며 확실한 배포 수단임을 잊지 말 것.
 
 ### 2026-02-27 실패 사례: 백엔드 API의 파일 포맷 불일치로 인한 빈 CSV 생성 이슈
 - **문제**: 담당자가 패치 리뷰를 승인(DONE) 처리했을 때, 다운로드 가능한 형태의 `final_approved_patches_[prod].csv` 파일이 항목명(헤더)만 존재하고 데이터가 하나도 매칭되지 않은 채 텅 빈 상태로 생성됨.
@@ -158,7 +173,7 @@
 
 #### 16. 호스트 운영체제(Windows)와 타겟 서버(Linux)의 명령어 혼동 금지 (에러 2, 9, 10, 16, 21)
 - **문제**: 로컬 Windows 호스트 터미널에서 `grep`, `python`, `node`를 실행하거나, 반대로 원격 서버망에서 의존성이 없는 `sqlite3`를 SSH 인라인으로 무심코 날리다 `CommandNotFoundException` 에러가 대규모로 발생함.
-- **교훈**: 내가 현재 상주하고 있는 터미널 환경이 **Windows PowerShell**인지, 아니면 전송 타겟인 **Linux Bash**인지 명확히 구분해야 함. 로컬에는 Linux 유틸리티가 전혀 없음을 명심하고 무조건 특정 환경에 특화된 전용 도구(예: `grep_search` 등)를 먼저 사용하거나, 리눅스 타겟팅 명령어는 온전히 `ssh`로 감싸서 실행할 것. 또한, 원격지에 특정 도구(`sqlite3`)가 당연히 있을 것이라 지레짐작하지 말 것.
+- **교훈**: 내가 현재 상주하고 있는 터미널 환경이 **Windows PowerShell**인지, 아니면 전송 타겟인 **Linux Bash**인지 명확히 구분해야 함. 로컬에는 Linux 유틸리티가 전혀 없음을 명심하고 무조건 특정 환경에 특화된 전용 도구(예: `grep_search` 등) 파이프라인을 먼저 사용하거나, 리눅스 타겟팅 명령어는 온전히 `ssh`로 감싸서 실행할 것. 또한, 원격지에 특정 도구(`sqlite3`)가 당연히 있을 것이라 지레짐작하지 말 것.
 
 #### 17. PowerShell -> SSH 인라인 복합 스크립트 전송 절대 금지 (에러 7, 11, 12, 14, 17, 20)
 - **문제**: PowerShell을 거쳐서 `ssh host "python3 -c \"...\""` 또는 `node -e \"...\"` 같은 다중 문자열 스크립트를 한 줄로 욱여넣으려다 괄호(`)`), 겹따옴표(`\"`), 변수(`x.get`) 등이 모조리 깨지면서 `SyntaxError`나 EOF 에러가 연쇄적으로 발생.
@@ -183,10 +198,17 @@
 - **교훈**: 파일 복사 시도 전이나, 스크립트 실행 전에는 윈도우든 리눅스 환경이든 해당 타겟 경로(Path)나 폴더가 제대로 `mkdir` 되어있고 존재하는지 `list_dir` 등으로 사전 점검하는 안전 확인(Sanity Check) 과정을 1초라도 반드시 거칠 것.
 
 #### 22. PM2 전역 경로 부재 시 `npx`를 통한 강제 재시작 (에러 23)
-- **문제**: 배포 후 화면 이동 시 `Application error` 및 `404 Uncaught ChunkLoadError` 발생. 원인은 앞선 배포 스크립트에서 `pm2: command not found` 에러가 나서 이전의 Next.js 노드 프로세스가 종료되지 않고 남아있었기 때문. 옛날 프로세스가 지워진 `.next` 정적 파일을 찾으려다 죽어버림.
+- **문제**: 배포 후 화면 이동 시 `Application error` 및 `404 Uncaught ChunkLoadError` 발생. 원인은 앞선 배포 스크립트에서 `pm2: command not found` 에러가 나서 이전의 Next.js 노드 프로세스가 종료되지 않고 남아있었기 때문에 옛날 프로세스가 지워진 `.next` 정적 파일을 찾으려다 죽어버림.
 - **교훈**: 원격 서버 내 `citec` 계정에 글로벌 PM2가 세팅되어 있지 않거나 `find ~/.nvm` 꼼수로도 찾아지지 않을 때는, 해당 Next.js 프로젝트 최상단 폴더에서 **`npx pm2 restart all`** 을 실행하여 반드시(반드시!) 프로세스를 갱신해야 클라이언트 캐싱 충돌을 막을 수 있음을 뼛속 깊이 새길 것.
--   * * 2 0 2 6 - 0 3 - 0 6   I s s u e * * :   T h e   ' R e t r y   A I   R e v i e w '   ( m a n u a l - r e v i e w   o r   i s A i O n l y )   p i p e l i n e   h u n g   a t   0 %   p r o g r e s s   i n d e f i n i t e l y   o n   t h e   d a s h b o a r d . 
- -   * * R o o t   C a u s e * * :   T h e   B u l l M Q   w o r k e r   ( q u e u e . t s )   w a s   r u n n i n g   \ o p e n c l a w   a s k \   w h i c h   d o e s   n o t   e m i t   t h e   n e c e s s a r y   s t d o u t   l o g g i n g   p a t t e r n s   ( e . g .   \ [ L L M - R E V I E W ]   S t a r t i n g   B a t c h   E v a l u a t i o n \ )   e x p e c t e d   b y   t h e   p r o g r e s s   s c r a p e r .   F u r t h e r m o r e ,   t h e   c o r e   f i x e s   ( R A G   a n d   Z o d   v a l i d a t i o n   l o o p )   i m p l e m e n t e d   i n   A c t i o n   P l a n s   1   a n d   2   w e r e   p r e v i o u s l y   m i s t a k e n l y   a d d e d   t o   \ s r c / a p p / a p i / p i p e l i n e / e x e c u t e / r o u t e . t s \ ,   w h i c h   i s   a   l e g a c y / u n u s e d   e n d p o i n t   i n   V 2   ( t h e   d a s h b o a r d   u s e s   \ / a p i / p i p e l i n e / r u n \   t o   d r o p   j o b s   i n t o   B u l l M Q   i n s t e a d ) . 
- -   * * R e s o l u t i o n * * :   R e f a c t o r e d   t h e   c o r e   e x e c u t i o n   l o g i c   n a t i v e l y   i n t o   \ s r c / l i b / q u e u e . t s \ .   T h e   w o r k e r   n o w   s e q u e n t i a l l y   o r c h e s t r a t e s   d a t a   c o l l e c t i o n ,   p r e p r o c e s s i n g ,   a n d   t h e   3 - t i e r   Z o d   s e l f - h e a l i n g   l o o p   u s i n g   p u r e   N o d e . j s   s p a w n   p r o m i s e s ,   e x p l i c i t l y   i n v o k i n g   \ j o b . u p d a t e P r o g r e s s ( ) \   a n d   \ j o b . l o g ( ) \   t o   e n s u r e   a c c u r a t e   a n d   r e s p o n s i v e   U I   p r o g r e s s   t r a c k i n g   f o r   b o t h   a u t o m a t e d   a n d   m a n u a l   r e v i e w   p i p e l i n e s . 
- 
- 
+
+### 2026-03-06 Issue Breakdown
+- **Issue**: The 'Retry AI Review' (manual-review or isAiOnly) pipeline hung at 0% progress indefinitely on the dashboard.
+- **Root Cause**: The BullMQ worker (queue.ts) was running `openclaw ask` which does not emit the necessary stdout logging patterns (e.g. `[LLM-REVIEW] Starting Batch Evaluation`) expected by the progress scraper. Furthermore, the core fixes (RAG and Zod validation loop) implemented in Action Plans 1 and 2 were previously mistakenly added to `src/app/api/pipeline/execute/route.ts`, which is a legacy/unused endpoint in V2 (the dashboard uses `/api/pipeline/run` to drop jobs into BullMQ instead).
+- **Resolution**: Refactored the core execution logic natively into `src/lib/queue.ts`. The worker now sequentially orchestrates data collection, preprocessing, and the 3-tier Zod self-healing loop using pure Node.js spawn promises, explicitly invoking `job.updateProgress()` and `job.log()` to ensure accurate and responsive UI progress tracking for both automated and manual review pipelines.
+
+### 2026-03-11 통계 불일치 (캐시 파편화) 사례: 파이프라인 재시도 시 DB 동기화 누락
+- **문제**: "Retry Failed" (실패 재시도) 버튼을 눌러 파이프라인을 재개했을 때, Ubuntu 패치의 AI 리뷰 완료 건수가 9건으로, 전처리 완료 건수(4건)보다 비정상적으로 높게 출력됨. 이 9건에는 이전 세션들의 불필요한 패치들이 섞여 있었음.
+- **실패 이유**: 기존 `api/pipeline/run/route.ts` API에서 `(!isAiOnly && !isRetry)` 조건을 걸어두는 바람에, 재시도를 할 땐 `ReviewedPatch` 데이터베이스(최종 결과 테이블)가 초기화되지 않고 스킵되었음. 하지만 이후에 실행되는 후속 파이썬 스크립트(`patch_preprocessing.py`)는 **무조건 자체적으로 `PreprocessedPatch` (전처리 테이블)를 비우고 다시 채우도록 작성**되어 있었음. 결국 앞쪽 테이블(전처리)은 리셋되어 4건인데 뒤쪽 테이블(최종 결과)은 리셋되지 않고 5건이 잔류해있다가 새 4건이 누적합산되어 9건으로 뻥튀기 된 것임.
+- **교훈**: 
+  1. 분산된 스크립트 아키텍처(Next.js 라우터 -> BullMQ 큐 -> Python 스크립트)에서 **상태 (State) 초기화**를 설계할 땐, 한 파츠라도 비우면 연관된 파츠도 무조건 같이 비우는 **All-or-Nothing (원자적) 동기화 원칙**을 지켜야 함.
+  2. "재시도(Retry)"라는 논리적 이름에 속지 말고, 그 재시도가 트리거하는 백그라운드 스크립트가 내부적으로 데이터를 덮어쓰는지(upsert) 아니면 통째로 갈아엎는지(delete-all) 반드시 코어 코드를 뜯어보고 흐름을 맞출 것.
