@@ -49,11 +49,12 @@ The AI Review step **MUST ONLY** produce a single, valid JSON array containing o
     "Vendor": "string (e.g., Red Hat, Oracle, Ubuntu)",
     "Date": "string (YYYY-MM-DD)",
     "Criticality": "string (Critical, High, Medium, Low)",
-    "Description": "string (English Summary of the issue limit 2 sentences)",
-    "KoreanDescription": "string (Korean Translation of Description)"
+    "Description": "string (English Summary limit 2 sentences. NEVER include raw .patch files or changelogs.)",
+    "KoreanDescription": "string (Korean Translation. NEVER include raw .patch files or changelogs.)"
   }
 ]
 ``` 등 규격화된 컬럼으로 출력하도록 강제하십시오.
+
 
 ---
 
