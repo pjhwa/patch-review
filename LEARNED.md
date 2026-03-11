@@ -212,3 +212,12 @@
 - **교훈**: 
   1. 분산된 스크립트 아키텍처(Next.js 라우터 -> BullMQ 큐 -> Python 스크립트)에서 **상태 (State) 초기화**를 설계할 땐, 한 파츠라도 비우면 연관된 파츠도 무조건 같이 비우는 **All-or-Nothing (원자적) 동기화 원칙**을 지켜야 함.
   2. "재시도(Retry)"라는 논리적 이름에 속지 말고, 그 재시도가 트리거하는 백그라운드 스크립트가 내부적으로 데이터를 덮어쓰는지(upsert) 아니면 통째로 갈아엎는지(delete-all) 반드시 코어 코드를 뜯어보고 흐름을 맞출 것.
+
+### 2026-03-11 실패 사례: SSE 스트림 이벤트 오버라이딩에 의한 UI 멈춤 (진행 상태 숨김)
+- **문제**: "Run Pipeline"를 실행 시 "Job queued... Waiting for worker..."라는 메시지만 떠 있고 AI 분석이 진행되는 세부 로그(`[AI Analysis]`)가 메인 메시지 창에 뜨지 않음(멈춘 것처럼 보임). 게다가 BullMQ 큐에 죽은 워커의 Job들이 쌓여 실제로 데드락이 됨.
+- **실패 이유**: 
+  1. 프론트엔드(`ProductGrid.tsx`)의 SSE 기반 이벤트 리스너가 들어오는 데이터에 `streamData.log`가 존재함에도 불구하고, 무조건 하단의 `streamData.status === 'active'` 분기 조건을 동시에 만족시켜서 `"Pipeline active..."`라는 기본 상태 메시지가 방금 들어온 의미있는 AI 로그를 즉시 덮어씌워버렸기 때문.
+  2. 이전 실패 혹은 테스트 등으로 백그라운드 `openclaw` 워커가 끝나지 않고 무한 대기 상태로 고착되어, 신규 파이프라인 Job들이 BullMQ에서 `waiting` 상태로 적체되어 있었음.
+- **교훈**: 
+  1. 분기 처리가 복잡한 프론트엔드의 실시간 이벤트 스트림 리스너를 설계할 때는, **메시지 출력의 우선순위**를 확실히 하여 특정 조건(`streamData.log` 형태의 구체적 산출물)이 존재할 땐 일반적인 Heartbeat/상태(status) 문자열 업데이트 분기가 실행되지 않도록(`!streamData.log` 조건 추가 등) 철저한 배타적 설계(Mutually Exclusive)를 적용해야 함.
+  2. 서버 백그라운드 Job Queue(Redis/BullMQ) 기반 아키텍처에서 알 수 없는 뻗음(Stuck) 현상이 발생하면 프론트엔드 고장만 의심하지 말고 즉각 `redis-cli keys 'bull:*' | xargs -r redis-cli del` (또는 flush)와 `pm2 restart` 콤보를 먹여 서버 자원을 정리하는 훈련을 습관화할 것.
