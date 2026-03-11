@@ -18,15 +18,6 @@
 
 ---
 
-### 2026-03-11 전처리 완료 목록 별도 확인 페이지 구축
-- **상황**: AI가 수집된 모든 패치를 무작정 병렬/순차 리뷰하기 전에, 실제로 쓸만한(System Critical) 패치만 필터링 된 것인지, 누락된 것은 없는지 사용자가 눈으로 먼저 살펴보고 Confirm할 수 있는 기능이 필요했음.
-- **해결 방식**:
-  1. `patch_preprocessing.py`에 `--no-db` 인자를 만들어 DB Insert 없이 `patches_for_llm_review.json`만 생성하는 프리뷰 모드 구축.
-  2. `Next.js` `/preprocessing` 라우트를 신설하고, `/api/preprocessing/*` 라우트(`run`, `preview`, `search-raw`, `confirm`)들을 세분화함.
-  3. 사용자가 UI에서 필터링된 목록을 확정(Confirm)하면 그제서야 원본 DB(`PreprocessedPatch`)에 저장하고 뒤이어 BullMQ 파이프라인(`isAiOnly=true`)을 백그라운드로 시작하도록 구조를 분리함.
-  4. 누락된 패치가 있을 시, `search-raw` 엔드포인트를 통해 원본 크롤링 JSON 데이터(Ubuntu, Oracle, RedHat) 파일들을 문자열 검색 기반으로 즉각 조회하여 목록에 추가할 수 있도록 연결.
-- **교훈**: AI 파이프라인은 완전 자동화도 좋지만, 대량의 데이터 처리가 엮여있을 땐 인간이 중간 점검을 할 수 있는 인터페이스(Human-in-the-loop)를 끼워넣는 것이 오류를 방지하고 정확도를 비약적으로 상승시킴. DB 로직과 파일 입출력 로직을 단일 스크립트의 옵션(`--no-db`)으로 분리하면, 프론트엔드와 유연하게 결합할 수 있다.
-
 ### 2026-03-11 개선 사례: AI 리뷰 결과물의 장황한 버그 픽스 내용 요약 강제
 - **상황**: AI가 패치 리뷰를 수행하고 최종 결과(`patch_review_ai_report.json`)를 생성할 때, 원본 데이터에 포함된 너무 상세한 패키지 변경 기록이나 `.patch` 파일명들(`kvm-target-i386-*.patch`)을 `Description`에 원문 그대로 나열하는 문제가 있었음.
 - **해결 방식**: AI 에이전트의 메인 프롬프트인 `SKILL.md`와 `PatchReview_MasterPrompt.md`의 제약 조건을 강화함.
