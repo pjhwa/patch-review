@@ -2,7 +2,27 @@
 
 ---
 
-## 🔴 [2026-03-11 신규 강제 규칙] 서버 우선 작업 + GitHub 자동 업데이트
+## 🟣 [2026-03-11] Ceph 파이프라인 구현 - Prisma 스키마 & 빌드 오류 교훈
+
+### Prisma upsert Where 절 오류
+- **문제**: 새 파이프라인에서 `PreprocessedPatch` 테이블에 upsert를 시도했지만 빌드 에러 발생.
+  - 에러: `Type '{ issueId: any; }' is not assignable to type 'PreprocessedPatchWhereUniqueInput'`
+- **원인**: `PreprocessedPatch` 모델의 `issueId` 필드에는 `@unique` 애노테이션이 없고, `@@index`만 있음. Prisma `upsert`의 `where` 절에는 `@unique` 또는 `@id` 필드만 가능.
+- **해결**: `upsert` 대신 `deleteMany({ where: { vendor: 'Ceph' }})` + `createMany({ data: [...] })` 패턴으로 전환.
+- **교훈**: **새 테이블에 upsert 쓰기 전 반드시 `schema.prisma`에서 해당 필드의 `@unique`/`@id` 여부를 먼저 확인할 것.** `@@index`는 upsert where에서 사용 불가.
+
+### Prisma createMany skipDuplicates 호환성
+- **문제**: `createMany({ ..., skipDuplicates: true })` 사용 시 타입 에러: `Type 'true' is not assignable to type 'never'`.
+- **원인**: 현재 서버에 설치된 Prisma 버전이 `createMany`의 `skipDuplicates` 옵션을 지원하지 않음.
+- **해결**: `skipDuplicates` 옵션을 제거. (이미 바로 위에서 `deleteMany`로 초기화했으므로 중복 문제 없음)
+- **교훈**: Prisma API 옵션은 버전에 따라 다르므로 서버 Prisma 버전 확인 후 사용할 것.
+
+### 서버 우선 워크플로우 실수 반복 방지
+- **실수**: 로컬에서 파일을 편집한 뒤 scp로 올리는 방식을 사용했음 (서버 우선 규칙 위반).
+- **교훈**: 반드시 서버에서 직접 편집하거나, 로컬 파일 → scp → 서버 빌드 검증 → scp 역방향 동기화 순서를 지킬 것. 로컬 편집 후 바로 GitHub 푸시는 절대 금지.
+
+---
+
 
 - **배경**: 사용자가 명시적으로 요청. 이 규칙은 새 대화창에서도 0순위로 적용되는 Antigravity 코어 명령임.
 - **규칙 1 — 서버 우선 수정 워크플로우**:
