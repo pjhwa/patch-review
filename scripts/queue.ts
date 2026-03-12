@@ -173,13 +173,18 @@ export function startWorker() {
                             return copy;
                         };
 
-                        for (let i = 0; i < cephPatchesRaw.length; i++) {
-                            const patch = cephPatchesRaw[i];
-                            const pName = patch.patch_id || patch.id || `ceph-patch-${i}`;
-                            await job.log(`[CEPH-AI Analysis] Processing patch ${i + 1}/${cephPatchesRaw.length}: ${pName}`);
+                        const BATCH_SIZE = 5;
+                        for (let i = 0; i < cephPatchesRaw.length; i += BATCH_SIZE) {
+                            const batch = cephPatchesRaw.slice(i, i + BATCH_SIZE);
+                            const actualBatchSize = batch.length;
+                            const batchNames = batch.map((p: any) => p.patch_id || p.id || 'Unknown').join(', ');
+                            const batchIndex = Math.floor(i / BATCH_SIZE) + 1;
+                            const totalBatches = Math.ceil(cephPatchesRaw.length / BATCH_SIZE);
+                            
+                            await job.log(`[CEPH-AI Analysis] Processing batch ${batchIndex}/${totalBatches} (${actualBatchSize} patches): ${batchNames}`);
 
-                            const prunedPatch = prunePatchCeph(patch);
-                            let prompt = `Read SKILL.md. Evaluate the following SINGLE Ceph storage patch according to the strict LLM evaluation rules in SKILL.md section 4. Return ONLY a pure JSON array with EXACTLY ONE object containing: 'IssueID', 'Component', 'Version', 'Vendor', 'Date', 'Criticality', 'Description', 'KoreanDescription', and optionally 'Decision' and 'Reason'. For Vendor use 'Ceph'. For Component use the specific Ceph component (e.g. 'ceph-radosgw', 'ceph-osd', 'ceph-mon', 'ceph-mds', 'ceph-mgr', 'ceph'). Do NOT skip evaluation steps.\n\n[PATCH DATA]:\n${JSON.stringify(prunedPatch)}`;
+                            const prunedBatch = batch.map((p: any) => prunePatchCeph(p));
+                            let prompt = `Read SKILL.md. Evaluate the following ${actualBatchSize} Ceph storage patches according to the strict LLM evaluation rules in SKILL.md section 4. Return ONLY a pure JSON array with EXACTLY ${actualBatchSize} objects. Each object MUST contain exactly: 'IssueID', 'Component', 'Version', 'Vendor', 'Date', 'Criticality', 'Description', 'KoreanDescription', and optionally 'Decision' and 'Reason'. For Vendor use 'Ceph'. For Component use the specific Ceph component. Do NOT skip evaluation steps.\n\n[BATCH DATA]:\n${JSON.stringify(prunedBatch)}`;
 
                             let parsedJson: any = null;
                             for (let attempt = 1; attempt <= MAX_AI_RETRIES + 1; attempt++) {
@@ -191,7 +196,7 @@ export function startWorker() {
                                             for (const lf of oldFiles) fs.rmSync(path.join(sessionsDir, lf), { force: true });
                                         }
                                         return await runCephStream('/home/citec/.nvm/versions/node/v22.22.0/bin/openclaw',
-                                            ['agent', '--agent', 'main', '--json', '--session-id', `ceph_${job.id}_${i}_${attempt}`, '-m', prompt],
+                                            ['agent', '--agent', 'main', '--json', '--session-id', `ceph_${job.id}_batch_${batchIndex}_${attempt}`, '-m', prompt],
                                             {}, { shell: false, cwd: cephSkillDir }, true
                                         );
                                     });
@@ -210,26 +215,31 @@ export function startWorker() {
                                     if (textContents.toLowerCase().includes('rate limit')) throw new Error('AI_REVIEW_FAILED: Rate Limit');
                                     parsedJson = extractJsonArray(textContents);
                                     if (!parsedJson) throw new Error('No JSON array in AI output');
-
-                                    const validation = ReviewSchema.safeParse(parsedJson);
-                                    if (!validation.success) {
-                                        const errorDetails = validation.error.errors.map((err: any) => `${err.path.join('.')}: ${err.message}`).join(', ');
-                                        throw new Error(`Zod Validation Failed: ${errorDetails}`);
+                                    if (!Array.isArray(parsedJson) || parsedJson.length !== actualBatchSize) {
+                                        throw new Error(`Expected array of length ${actualBatchSize}, but got ${Array.isArray(parsedJson) ? parsedJson.length : 'non-array'}`);
                                     }
 
-                                    finalReviewedPatches.push(parsedJson[0]);
+                                    for(const item of parsedJson) {
+                                        const validation = ReviewSchema.safeParse(item);
+                                        if (!validation.success) {
+                                            const errorDetails = validation.error.errors.map((err: any) => `${err.path.join('.')}: ${err.message}`).join(', ');
+                                            throw new Error(`Zod Validation Failed for an item: ${errorDetails}`);
+                                        }
+                                        finalReviewedPatches.push(item);
+                                    }
+                                    
                                     break;
                                 } catch (err: any) {
                                     if (err.message.includes('AI_REVIEW_FAILED')) throw err;
                                     if (attempt <= MAX_AI_RETRIES) {
-                                        prompt += `\n\nPrevious attempt failed. Fix this error and resubmit: ${err.message}\nReturn ONLY a JSON array.`;
-                                        await job.log(`  -> Attempt ${attempt} failed for ${pName}, retrying...`);
+                                        prompt += `\n\nPrevious attempt failed. Fix this error and resubmit: ${err.message}\nReturn ONLY a JSON array with EXACTLY ${actualBatchSize} objects.`;
+                                        await job.log(`  -> Attempt ${attempt} failed for batch ${batchIndex}, retrying...`);
                                     } else {
-                                        await job.log(`[SKIP] ${pName} permanently failed after ${MAX_AI_RETRIES} retries.`);
+                                        await job.log(`[SKIP] Batch ${batchIndex} permanently failed after ${MAX_AI_RETRIES} retries.`);
                                     }
                                 }
                             }
-                            await job.updateProgress(50 + Math.floor(((i + 1) / cephPatchesRaw.length) * 40));
+                            await job.updateProgress(50 + Math.floor(((i + actualBatchSize) / cephPatchesRaw.length) * 40));
                         }
 
                         // Save AI report
@@ -389,13 +399,18 @@ export function startWorker() {
                     await job.updateProgress(60);
                     await job.log(`AI Review in progress... Sequentially evaluating ${patchesRaw.length} patches (Zod Self-Healing enabled)`);
 
-                    for (let i = 0; i < patchesRaw.length; i++) {
-                        const patch = patchesRaw[i];
-                        const pName = patch.id || patch.issueId || patch.IssueID || `Unknown-${i}`;
-                        await job.log(`[AI Analysis] Processing patch ${i + 1}/${patchesRaw.length}: ${pName}`);
+                    const BATCH_SIZE = 5;
+                    for (let i = 0; i < patchesRaw.length; i += BATCH_SIZE) {
+                        const batch = patchesRaw.slice(i, i + BATCH_SIZE);
+                        const actualBatchSize = batch.length;
+                        const batchNames = batch.map((p: any) => p.id || p.issueId || p.IssueID || 'Unknown').join(', ');
+                        const batchIndex = Math.floor(i / BATCH_SIZE) + 1;
+                        const totalBatches = Math.ceil(patchesRaw.length / BATCH_SIZE);
+                        
+                        await job.log(`[AI Analysis] Processing batch ${batchIndex}/${totalBatches} (${actualBatchSize} patches): ${batchNames}`);
 
-                        const prunedPatch = prunePatchData(patch);
-                        let basePrompt = `Read SKILL.md. Evaluate the following SINGLE PATCH exactly according to the strict LLM evaluation rules detailed in SKILL.md section 4. Do NOT perform any web scraping. Do NOT use tools to write to files, simply output the text directly. Return ONLY a pure JSON array containing EXACTLY ONE object. The object MUST contain exactly: 'IssueID', 'Component', 'Version', 'Vendor', 'Date', 'Criticality', 'Description', 'KoreanDescription', and optionally 'Decision' and 'Reason'. Do not skip Step 4.\\n\\n[PATCH DATA TO EVALUATE]:\\n${JSON.stringify(prunedPatch)}`;
+                        const prunedBatch = batch.map((p: any) => prunePatchData(p));
+                        let basePrompt = `Read SKILL.md. Evaluate the following ${actualBatchSize} PATCHES exactly according to the strict LLM evaluation rules detailed in SKILL.md section 4. Do NOT perform any web scraping. Do NOT use tools to write to files, simply output the text directly. Return ONLY a pure JSON array containing EXACTLY ${actualBatchSize} objects. The object MUST contain exactly: 'IssueID', 'Component', 'Version', 'Vendor', 'Date', 'Criticality', 'Description', 'KoreanDescription', and optionally 'Decision' and 'Reason'. Do not skip Step 4.\\n\\n[BATCH DATA TO EVALUATE]:\\n${JSON.stringify(prunedBatch)}`;
                         basePrompt += ragExclusions;
 
                         let currentPrompt = basePrompt;
@@ -410,7 +425,7 @@ export function startWorker() {
                                         for (const lf of oldFiles) fs.rmSync(path.join(sessionsDir, lf), { force: true });
                                     }
                                     return await runStream('/home/citec/.nvm/versions/node/v22.22.0/bin/openclaw',
-                                        ['agent', '--agent', 'main', '--json', '--session-id', `os_${job.id}_${i}_${attempt}`, '-m', currentPrompt],
+                                        ['agent', '--agent', 'main', '--json', '--session-id', `os_${job.id}_batch_${batchIndex}_${attempt}`, '-m', currentPrompt],
                                         {}, { shell: false }, true
                                     );
                                 });
@@ -431,28 +446,33 @@ export function startWorker() {
 
                                 parsedJson = extractJsonArray(textContents);
                                 if (!parsedJson) throw new Error('No JSON array found in AI output even after code fence stripping.');
-
-                                const validation = ReviewSchema.safeParse(parsedJson);
-                                if (!validation.success) {
-                                    const errorDetails = validation.error.errors.map((err: any) => `${err.path.join('.')}: ${err.message}`).join(', ');
-                                    throw new Error(`Zod Schema Validation Failed: ${errorDetails}`);
+                                if (!Array.isArray(parsedJson) || parsedJson.length !== actualBatchSize) {
+                                    throw new Error(`Expected array of length ${actualBatchSize}, but got ${Array.isArray(parsedJson) ? parsedJson.length : 'non-array'}`);
                                 }
 
+                                for(const item of parsedJson) {
+                                    const validation = ReviewSchema.safeParse(item);
+                                    if (!validation.success) {
+                                        const errorDetails = validation.error.errors.map((err: any) => `${err.path.join('.')}: ${err.message}`).join(', ');
+                                        throw new Error(`Zod Schema Validation Failed for an item: ${errorDetails}`);
+                                    }
+                                    finalReviewedPatches.push(item);
+                                }
+                                
                                 // Success
-                                finalReviewedPatches.push(parsedJson[0]);
                                 break;
                             } catch (err: any) {
                                 if (err.message.includes('AI_REVIEW_FAILED')) throw err;
 
                                 if (attempt <= MAX_AI_RETRIES) {
-                                    currentPrompt += `\\n\\n이전 응답이 실패했습니다. 다음 Zod 구조적 에러를 해결하여 다시 제출하세요: ${err.message}\\n반드시 JSON 배열 형태로 출력하세요.`;
-                                    await job.log(`  -> Attempt ${attempt} failed for ${pName}, retrying...`);
+                                    currentPrompt += `\\n\\n이전 응답이 실패했습니다. 다음 에러를 해결하여 다시 제출하세요: ${err.message}\\n반드시 JSON 배열 형태로 EXACTLY ${actualBatchSize} 개의 객체를 출력하세요.`;
+                                    await job.log(`  -> Attempt ${attempt} failed for batch ${batchIndex}, retrying...`);
                                 } else {
-                                    await job.log(`[SKIP] Patch ${pName} permanently failed AI review after ${MAX_AI_RETRIES} retries. Error: ${err.message}`);
+                                    await job.log(`[SKIP] Batch ${batchIndex} permanently failed AI review after ${MAX_AI_RETRIES} retries. Error: ${err.message}`);
                                 }
                             }
                         }
-                        await job.updateProgress(60 + Math.floor(((i + 1) / patchesRaw.length) * 30));
+                        await job.updateProgress(60 + Math.floor(((i + actualBatchSize) / patchesRaw.length) * 30));
                     }
 
                     fs.writeFileSync(absoluteReportPath, JSON.stringify(finalReviewedPatches, null, 2));

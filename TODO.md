@@ -1,70 +1,21 @@
-# Patch Review Board - Dashboard TODO
+# Patch-Review-Dashboard-v2 구조 분석, 문서화 및 Git 초기화 업데이트 계획
 
-## 작성일: 2026-02-27
+## 1. 계획 (Planning)
+- [ ] 1.1. tom26 서버에 SSH로 접속(`citec@tom26` 또는 `citec@172.16.10.237`)하여 `~/patch-review-dashboard-v2`를 분석한다.
+- [ ] 1.2. `~/.openclaw/workspace/skills/patch-review` 디렉토리에 있는 각 파이프라인 스크립트(RedHat, Oracle, Ubuntu, Ceph, MariaDB)를 상세 분석한다.
+- [ ] 1.3. 시스템 설정(cron 등) 및 `openclaw agent:main` 호출 로직 등 AI 리뷰 작동 방식을 분석한다.
 
-Mission Control Dashboard에서 영감을 받은 **Patch Review Board** 통합 대시보드 구축을 위한 단계별 구현 계획입니다.
+## 2. 문서화 (Execution)
+- [ ] 2.1. 수집된 팩트 기반으로 `README.md` (영문) 작성 (Fancy 트렌드 적용).
+- [ ] 2.2. 아키텍처, 파이프라인 플로우, 기술 스택, AI 구동방식에 대한 문서를 영문/한글 버전으로 각각 작성. (`docs/` 폴더 내 저장)
+- [ ] 2.3. 모든 문서는 로컬의 `docs/` 및 Github 레포지토리에 동기화할 준비 완료.
 
----
+## 3. 코드 재구성 및 GitHub 반영 (Execution)
+- [ ] 3.1. 기존 GitHub의 리포지토리 내용 전부를 초기화(새로운 베이스로 덮어쓰기).
+- [ ] 3.2. 현재 작동중인 대시보드 v2의 핵심 소스 코드를 로컬 리포지토리 디렉토리로 정리.
+- [ ] 3.3. 서버의 파이프라인 디렉토리(`.openclaw/workspace/skills/patch-review/`)를 대시보드 프로젝트 내부에 복제(새로운 서버 적용을 위해 구조화).
+- [ ] 3.4. 변경된 전체 코드와 문서를 git commit & push.
 
-## 2026-02-27 검토 완료 작업내역
-- [x] Dashboard 메인 카드 숫자를 더미 데이터에서 실서버 기준 실제 진행률 (ex: 3 / 7 Products Reviewed | 21 Patches Reviewed)로 변경 적용 
-- [x] 리뷰 완료된 카테고리의 하위 제품 클릭 시, 각 제품 상세 리뷰 화면에서 담당자가 패치의 적합성(제외 여부)을 평가하도록 UI 개선.
-- [x] 담당자가 리뷰 완료 후 **[Mark Product Review as DONE]** 버튼 클릭 시 `api/pipeline/finalize` 백엔드 로직을 통해 최종 `final_approved_patches_[prod].csv` 파일이 톰캣 서버에 안전하게 생성/저장.
-- [x] 카테고리 상세 페이지 우측 상단에 **[Download Final CSV Document]** 추가.
-- [x] **BugFix**: Finalize 로직에서 빈 CSV(헤더만 존재)가 생성되던 이슈 해결. (기존 JSON 대신 최종 AI 결과물인 `patch_review_final_report.csv` 원본을 직접 파싱하게 PapaParse 플러그인 도입 및 로직 교체)
-- [x] **New Feature**: 전역 레이아웃 및 각 기능별 UI 컴포넌트에 대한 완전한 다국어(KOR/ENG) i18n 지원 구현 및 쿠키 기반의 상태 저장 연동 완료.
-
-## 신규 기능 완료내역 (2026-03-11)
-- [x] **New Feature**: `patch_preprocessing.py` 전처리 스크립트 실행 시, 필터링 로직에 의해 누락된 패치들의 정확한 사유를 기록하는 Audit Log (`dropped_patches_audit.csv`) 자동 생성 기능 추가 (신뢰도 검증용 목적).
-- [x] **BugFix**: `patch_preprocessing.py` 전처리 스크립트 실행 시 패치 개수가 1~2개씩 미세하게 요동치는 비결정론(Nondeterministic) 버그 해결. (Python의 `set()` 해시 무작위성과 `glob` 결과물 정렬 부재를 `sorted()`로 감싸 보완함)
-
-## 1. 계획 및 분석 단계 (Planning & Analysis)
-- [x] 요구사항 분석: 각 카테고리/제품별 패치 계층 구조 파악
-- [x] 분기별 스케줄링 및 파이프라인(수집 -> 전처리 -> AI 분석 -> 담당자 검토) 파이프라인 구조화
-- [x] Mission Control 기반 프리미엄 UI/UX 기조 적용 방안 설계
-- [x] 사용자/팀에게 초기 구현 계획(Implementation Plan) 검토 받기 (현재 단계)
-
-## 2. 기반 환경 설정 (Environment Setup)
-- [x] 프론트엔드 스택 초기화: Next.js 15 (App Router), Tailwind CSS v4, Framer Motion, Shadcn UI
-- [x] 백엔드/데이터 상태: 파일 기반 파이프라인(JSON) 연동 구성
-- [x] 기본 UI/UX 컴포넌트: Dark Mode 전용 프리미엄 테마 적용 (glassmorphism 등)
-
-## 3. 데이터 모델링 및 시각화 (Data Modeling & Visualization)
-- [x] 분류 체계 (Taxonomy) 데이터 모델 작성: `Category(os, middleware...) > Product(linux, windows...) > Sub-Product(Red Hat...)`
-- [x] 파이프라인 스테이지별 데이터 스키마 정의 (json 파일 포맷 기준)` -> `수집 완료` -> `전처리 완료` -> `AI 분석 완료(담당자 확인)`
-- [x] 대시보드 Overview 화면 개발: 각 제품별 단계별 현황과 패치 개수 실시간 표시
-
-## 4. 백엔드 로직 및 자동화/수동 실행 (Backend & Automation)
-- [x] 수동 실행 트리거: 각 카테고리 뷰어의 `Run Pipeline` 클릭 시 -> Next.js API Routes (`/api/pipeline/execute`) 호출
-- [x] 파이프라인 1단계 (수집): `batch_collector.js` 실행 -> `batch_data/` 디렉토리에 원시 데이터 JSON 생성
-- [x] 파이프라인 2단계 (전처리): `patch_preprocessing.py` 실행 -> `patches_for_llm_review.json` 생성
-- [x] 파이프라인 3단계 (AI 리뷰): OpenClaw Agent 호출 (`SKILL.md` Step 3 연동) -> `patch_review_final_report.csv` 생성
-- [x] 프론트엔드 실시간 카운트 UI: 수집된 패치, 전처리된 패치, AI 리뷰 완료된 패치 개수를 각 스테이지별로 화면에 표시
-- [x] 수동 트리거 UI 개발: 대시보드 UI에 모든 카테고리를 표시하되, 실제 실행 로직은 `os -> linux` 계열만 작동하도록 구성.
-
-## 5. 담당자 검토 뷰 및 패치 상세 (Review Board & Details)
-- [x] AI 리뷰 결과 테이블 뷰 개발: 담당자가 확인해야 할 최종 패치 목록
-- [x] 세부 패치 모달/페이지 개발: AI가 작성한 치명적인 버그 수정 내역 설명 확인 기능
-- [x] CSV 출력 기능: 최종 검토 대상 패치 목록을 CSV 파일로 다운로드하는 기능 개발
-- [x] 과거 기록(Archive) 화면 개발: 파이프라인 재실행 시 백업된 이전 히스토리 내역 조회 및 CSV 다운로드 연동 완료
-
-## 6. 테스트 및 검증 (Testing & Validation)
-- [x] 스태프 엔지니어 수준의 코드 리뷰 및 구조적 우아함 검토
-- [x] 전체 파이프라인 수동/자동 전환 통합 테스트
-- [x] UI 랜더링 품질 (모바일 반응형, 애니메이션) 시각적 검증
-
-## 7. 완료 및 문서화 (Documentation)
-- [x] `LEARNED.md` 업데이트 (이슈 및 트러블슈팅 내역)
-- [x] 최신 트렌드의 Fancy한 GitHub README 문서 작성
-
-## 2026-03-12 신규 기능 계획 (MariaDB 연동)
-- [x] 1. Python 전처리 스크립트 작성 (`mariadb_preprocessing.py`) 및 서버 배포
-- [x] 2. Next.js 백엔드 워커 큐 추가 (`src/lib/queue.ts`)
-- [x] 3. 통계 및 라우터 API 확장 (`src/app/api/pipeline/mariadb/*`)
-- [x] 4. 대시보드 UI 연동 및 컴포넌트 활성화 (`page.tsx`, `ProductGrid.tsx`, `ClientPage.tsx`)
-- [ ] 5. 검증 및 문서 업데이트 최신화
-
----
-
-## (이전 작업 내용 - 보관)
-- [x] Oracle Linux 패치 리뷰 로직 스크립트 수정 및 검증 완 (2026-02-25 이전)
+## 검토 (Review)
+- [ ] 모든 문서가 추정이나 mock 데이터가 없는지 확인.
+- [ ] 파이프라인 폴더 등 구조가 다른 사용자가 클론 시 정상 동작 가능하게 배치되었는지 확인.
