@@ -341,3 +341,13 @@
 - **성공 요인**: `docs/ADDING_NEW_PRODUCT.md` 시스템 문서를 100% 준수하여 Python 데이터 정제부터 Next.js API의 카테고리/벤더 매핑까지 하나도 빠짐없이 체계적으로 구현.
 - **Troubleshooting**: `stage/[stageId]/route.ts`에 MariaDB 벤더 매핑을 잊지 않고 추가하여 (이전 Ceph 사태의 교훈 적용) 데이터 누출(Data Leak/Mix)을 사전에 차단함.
 - **Troubleshooting 2**: Next.js 15 환경에서 `products/route.ts` 수정 시 `category === 'database'` 조건에서 "types have no overlap" 타입스크립트 에러 발생. 상단의 필터 조건문(`if (category !== 'os' && category !== 'storage' && category !== 'database')`)을 미리 확장해두지 않으면 TS 컴파일러가 강제 추론해버린다는 사실을 학습하고 빠르게 핫픽스 후 실서버 무중단 배포(pm2 restart 0) 완료.
+
+### 2026-03-12 MariaDB 특정 Red Hat AppStream 버전 필터링 추가 및 AI 요약 규칙 강화
+- **문제**: MariaDB 전처리 시, 불필요한 OS 환경 버전들이 너무 많이 포함되거나, AI 리뷰의 "상세 설명(Description)" 필드에 불필요하게 원본 체인지로그나 `.patch` 파일명이 그대로 복사되는 문제가 발생함.
+- **해결 방안 (MariaDB 전처리 및 프롬프트 개선)**:
+  1. `mariadb_preprocessing.py` 스크립트를 수정하여 `affected_products`에 오직 다음 3가지 환경만 허용하도록 `valid_envs` 배열을 하드코딩함:
+      - `Red Hat Enterprise Linux AppStream (v. 8)`
+      - `Red Hat Enterprise Linux AppStream (v. 9)`
+      - `Red Hat Enterprise Linux AppStream (v. 10)`
+  2. 대시보드의 백엔드 AI 리뷰 프롬프트 로직(`src/lib/queue.ts`)에 MariaDB 전용 규칙(`CRITICAL RULE FOR DESCRIPTIONS`)을 추가하여 "무엇을(WHAT), 왜(WHY) 고쳤는지 임원진 요약본으로 서술하고, 절대 원본 파일명이나 코드를 복사붙여넣기 하지 말 것"을 강제함.
+- **교훈**: AI 에이전트는 명시적인 금지 규칙(Negative Constraint)이 주어지지 않으면 입력받은 `description` 문자열(특히 오픈소스 패치명)을 비판 없이 그대로 출력(Hallucination/Copy-Paste)하는 경향이 있다. 프롬프트를 통해 형태를 엄격히 제한하고, 파이프라인 단에서 허용되는 OS 버전 문자열 화이트리스트를 관리해야만 깨끗한 UI 렌더링이 가능하다.
