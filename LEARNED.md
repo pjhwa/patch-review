@@ -33,7 +33,15 @@
 - **문제**: `createMany({ ..., skipDuplicates: true })` 사용 시 타입 에러: `Type 'true' is not assignable to type 'never'`.
 - **원인**: 현재 서버에 설치된 Prisma 버전이 `createMany`의 `skipDuplicates` 옵션을 지원하지 않음.
 - **해결**: `skipDuplicates` 옵션을 제거. (이미 바로 위에서 `deleteMany`로 초기화했으므로 중복 문제 없음)
-- **교훈**: Prisma API 옵션은 버전에 따라 다르므로 서버 Prisma 버전 확인 후 사용할 것.
+- **해결 방안 & 교훈**:
+  - Prisma Adapter의 TimeType 규칙에 맞춰 `.strftime("%Y-%m-%d %H:%M:%S")` 로 명시적 포맷팅 적용 필수.
+  - Optional `boolean` 컬럼이라도 Prisma 동작에선 에러가 나기 쉬우므로, 0 또는 1을 DB 쿼리에 명시하여 오류 차단.
+
+### 전처리 필터링 원본 보존의 원칙 (Parsing vs Output)
+- **상황**: 대시보드의 "상세 설명(Description)"이 너무 길어서 노이즈가 발생하여, 간략한 `overview` 필드 텍스트를 대체 출력해달라는 요구사항 발생.
+- **실패 사례**: `patch_data["description"]`을 바꾸는 것 외에도, 상단에서 `combined_text` 키워드 스캐님에 쓰이는 `description` 변수까지 `overview`로 덮어씌움. 그 결과, `CRITICAL` 키워드들이 긴 본문에만 있고 `overview`에는 없는 패치들이 탈락하여 추출 개수가 17개에서 13개로 감소함.
+- **해결 방안 & 교훈**: 키워드 판독 시에는 정보량이 많은 원본(full `description`, `body`)을 계속 스캔하도록 유지하되, **최종 UI/JSON 결과물에 매핑하는 Projection 단계(`record` dict 구성)**에서만 `overview`를 대입하여 두 계층(Parsing / Presentation)을 철저히 분리.
+- **교훈**: 반드시 서버에서 직접 편집하거나, 로컬 파일 → scp → 서버 빌드 검증 → scp 역방향 동기화 순서를 지킬 것. 로컬 편집 후 바로 GitHub 푸시는 절대 금지.
 
 ### 서버 우선 워크플로우 실수 반복 방지
 - **실수**: 로컬에서 파일을 편집한 뒤 scp로 올리는 방식을 사용했음 (서버 우선 규칙 위반).
