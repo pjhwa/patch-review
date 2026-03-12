@@ -12,6 +12,8 @@
 데이터 수집기(Collector)가 가져온 원본 JSON/XML 파일을 읽어서 AI 리뷰에 적합한 포맷으로 변환하고, 데이터베이스에 등록하는 핵심 단계입니다.
 
 - [ ] **디렉토리 분리 및 스크립트 작성**: `~/.openclaw/workspace/skills/patch-review/[카테고리]/[제품명]/` 하위에 `[제품명]_preprocessing.py` 생성.
+- [ ] **메타데이터 스킵 (중요)**: 원본 데이터 폴더 내에 존재하는 `metadata.json` 등 실제 패치가 아닌 설정 파일들은 전처리 루프에서 명시적으로 제외(Skip)할 것.
+- [ ] **정밀한 환경 필터링 (화이트리스트)**: 불필요한 OS 환경 버전이 LLM의 컨텍스트를 오염시키지 않도록 `affected_products` 필드 등을 검사할 때, 당해 제품에 꼭 필요한 타겟 환경(예: 특정 RHEL AppStream 버전만)만 추출되도록 엄격한 화이트리스트(Whitelist)를 적용할 것.
 - [ ] **DB 매핑 (중요)**: 스크립트 내에서 `Prisma` 로컬 데이터베이스(`patch-review.db`)의 `PreprocessedPatch` 테이블 구조에 정확히 맞춰서 `INSERT OR REPLACE` 쿼리 작성. (특히 날짜는 `.strftime("%Y-%m-%d %H:%M:%S")` 로 ISO의 `T` 포맷을 필히 제거해야 Prisma 호환 오류가 안 남).
 - [ ] **Audit Log 기록 의무화**: 조건에 미달하여 버려지는(Drop) 패치들은 수동 UI 확인에 의존하지 말고, 스크립트 단계에서 즉시 `dropped_patches_audit_[prod].csv` 파일로 내보내어 전처리 투명성을 100% 확보할 것.
 - [ ] **결정론(Determinism) 적용**: 파일 목록(`glob`)이나 배열(set) 등을 평가할 때는 반드시 `sorted()`를 감싸주어 해시 무작위화에 의한 UI 개수 변동 버그를 원천 차단.
@@ -22,6 +24,7 @@
 - [ ] **Job 분기 추가**: `job.name === 'run-[제품명]-pipeline'` 형태로 분기(if-else) 추가.
 - [ ] **DB 초기화 로직 추가**: 파이프라인 재실행(Retry) 시 중복을 막기 위해 실행 맨 처음에 `deleteMany({ where: { vendor: '[벤더명]' } })`로 낡은 데이터를 반드시 비우기.
 - [ ] **전역 Mutex 락 적용 (`withOpenClawLock`)**: AI 에이전트(`openclaw`) 호출 부분은 반드시 `withOpenClawLock`으로 감싸서 다중 실행 시 컨텍스트(.jsonl) 오염을 막고 100% 고립된 세션에서 수행되도록 보장할 것.
+- [ ] **네거티브 프롬프트 제약(Negative Constraint) 추가**: AI 프롬프트 작성 시, "무엇을, 왜 고쳤는지 임원진 형식으로 요약하라"는 지시와 함께 **"절대 원본 체인지로그나 .patch 파일명을 그대로 복사 붙여넣기 하지 말 것(No Copy-Paste)"**이라는 강력한 금지 규칙을 반드시 추가하여 노이즈 없는 고품질 요약을 유도할 것.
 - [ ] **상태 로그 출력**: `job.log()`와 `job.updateProgress()`를 적절히 배치해 대시보드 UI에 진행 상황이 실시간 동기화 되도록 할 것.
 
 ### 3. 통계 및 라우터 API 확장 (`src/app/api/...`)
