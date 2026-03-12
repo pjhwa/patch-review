@@ -165,8 +165,8 @@ export function startWorker() {
                                     try {
                                         const sessionsDir = path.join(process.env.HOME || '/home/citec', '.openclaw/agents/main/sessions');
                                         if (fs.existsSync(sessionsDir)) {
-                                            const lockFiles = fs.readdirSync(sessionsDir).filter((f: string) => f.endsWith('.lock'));
-                                            for (const lf of lockFiles) fs.rmSync(path.join(sessionsDir, lf), { force: true });
+                                            const oldFiles = fs.readdirSync(sessionsDir).filter((f: string) => f.endsWith('.lock') || f.includes('.jsonl'));
+                                            for (const lf of oldFiles) fs.rmSync(path.join(sessionsDir, lf), { force: true });
                                         }
                                     } catch (cleanErr) { }
 
