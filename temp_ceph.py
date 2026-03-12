@@ -417,7 +417,7 @@ def main():
             "cwe_ids": cwe_ids,
             "category": category,
             "title": summary,
-            "description": description,
+            "description": patch.get("overview") or description,
             "issued_date": parse_patch_date(patch, "security"),
             "url": patch.get("html_url", ""),
         }
@@ -496,7 +496,7 @@ def main():
             "cwe_ids": "",
             "category": category,
             "title": name,
-            "description": body[:8000] if body else "",
+            "description": (patch.get("overview") or body or "")[:8000],
             "issued_date": parse_patch_date(patch, "release"),
             "url": patch.get("html_url", ""),
         }
