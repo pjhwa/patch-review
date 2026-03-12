@@ -57,6 +57,13 @@ Mission Control Dashboard에서 영감을 받은 **Patch Review Board** 통합 �
 - [x] `LEARNED.md` 업데이트 (이슈 및 트러블슈팅 내역)
 - [x] 최신 트렌드의 Fancy한 GitHub README 문서 작성
 
+## 2026-03-12 신규 기능 계획 (MariaDB 연동)
+- [x] 1. Python 전처리 스크립트 작성 (`mariadb_preprocessing.py`) 및 서버 배포
+- [x] 2. Next.js 백엔드 워커 큐 추가 (`src/lib/queue.ts`)
+- [x] 3. 통계 및 라우터 API 확장 (`src/app/api/pipeline/mariadb/*`)
+- [x] 4. 대시보드 UI 연동 및 컴포넌트 활성화 (`page.tsx`, `ProductGrid.tsx`, `ClientPage.tsx`)
+- [ ] 5. 검증 및 문서 업데이트 최신화
+
 ---
 
 ## (이전 작업 내용 - 보관)
