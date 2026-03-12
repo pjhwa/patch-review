@@ -111,9 +111,31 @@ def preprocess_patches():
                         break
 
             diff_content = extract_diff_content(full_text)
+            # --- ENVIRONMENT FILTERING ---
+            affected_prods = data.get('affected_products', [])
             os_version_val = "All"
-            if data.get('affected_products') and isinstance(data['affected_products'], list):
-               os_version_val = ", ".join(sorted(set([str(p) for p in data['affected_products']])))
+            
+            valid_envs = [
+                "Red Hat Enterprise Linux AppStream (v. 8)",
+                "Red Hat Enterprise Linux AppStream (v. 9)",
+                "Red Hat Enterprise Linux AppStream (v. 10)"
+            ]
+            
+            # Check if any of the valid environments are in the affected products
+            has_valid_env = False
+            if isinstance(affected_prods, list):
+                for prod in affected_prods:
+                    if str(prod) in valid_envs:
+                        has_valid_env = True
+                        break
+                
+                if not has_valid_env and affected_prods:
+                    audit_writer.writerow([patch_id, vendor, date_str, 'Missing Specific AppStream Env', severity, summary[:100]])
+                    continue
+                    
+                os_version_val = ", ".join(sorted(set([str(p) for p in affected_prods if str(p) in valid_envs])))
+                if not os_version_val:
+                    os_version_val = "All"
             
             processed_list.append({
                 'id': patch_id,
@@ -127,7 +149,7 @@ def preprocess_patches():
                 'summary': summary,
                 'severity': severity,
                 'diff_content': diff_content, 
-                'description': full_text,
+                'description': desc if desc else full_text,
                 'ref_url': data.get('url', f"https://access.redhat.com/errata/{patch_id}")
             })
             
