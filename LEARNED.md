@@ -2,6 +2,16 @@
 
 ---
 
+## 🟣 [2026-03-12] AI API Rate Limit 오류 발생 시 리뷰 재실행(Resume) 기능
+- **상황**: AI API Rate Limit 에러로 파이프라인이 중단된 경우, 재실행 시 기존 진행 내역이 DB 및 JSON에서 무자비하게 덮어써져 수 시간의 리뷰 시간이 날아가는 심각한 문제가 존재함. "AI 리뷰 단독실행"이나 "오류 패치 재수집"의 엣지 케이스를 제대로 처리하지 않고 무조건 리셋하는 구조였음.
+- **교훈 및 강력한 행동 지침**:
+  - 기존의 모든 파이프라인(OS, Ceph, MariaDB `queue.ts`)의 DB 업데이트(Upsert) 및 JSON 파일 출력 위치를 AI 루프의 완전 종료 시점에서 **개별 패치의 평가(Zod Validation 통과) 직후**로 이동시킴으로서 즉각적(Incremental) 상태 보존 메커니즘을 적용.
+  - Rate Limit 에러 예외 캐치 시 `fs.writeFileSync`를 활용하여 서버 단(/tmp)에 `.rate_limit_[pipeline_key]` Flag 플래그 파일을 기록하도록 백엔드 처리. 
+  - 새 파이프라인 기동 시(isAiOnly 혹은 isRetry 옵션), Rate Limit 플래그가 확인되면 `[RESUME] (이어서 진행 모드)`를 가동하여 대상 파일의 전처리(Preprocessing) 과정을 건너뛰고 기존 저장된 JSON 배열을 읽어와 리뷰 통과된 Patch ID (`IssueID`) 들을 Skip 하는 로직 개발.
+  - Frontend 화면 (`ProductGrid.tsx`)의 SSE Stream 수신 측면에 `[RESUME]` 및 `[SKIP-RESUME]` Keyword 로직을 구현하여 사용자에게 "이전에 완료된 건은 건너뛰고 이어서 리뷰를 진행합니다" 따위의 재개 상황을 명확하게 이모지 기반으로 표시.
+  - **데이터베이스 보존 원칙 (명심할 것)**: 사용자가 고의적으로 "새로 고침 풀 실행"을 시켜서 새로운 파이프라인으로 덮어쓰겠다는 강한 의도나 지시(isResumeMode !== true)가 없는 이상 무자비하게 `prisma.preprocessedPatch.deleteMany()` 와 `prisma.reviewedPatch.deleteMany()` 를 호출해서는 안됨. 이 사소하지만 공격적인 쿼리 한 줄이 기존 분석 이력을 날려버림.
+
+
 ## 🟣 [2026-03-12] 신규 카테고리 및 제품(Ceph) 파이프라인 전면 구축의 핵심 강제 지침
 - **상황**: 대시보드 V2에 기존 OS 외에 새로운 스토리지 카테고리(Storage)와 신규 제품(Ceph)을 추가하는 일련의 과정을 성공적으로 완수함. 앞으로 계속해서 새로운 카테고리와 제품을 추가해야 함.
 - **교훈 및 강력한 행동 지침**: 
