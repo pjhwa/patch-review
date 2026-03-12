@@ -2,6 +2,18 @@
 
 ---
 
+## 🟣 [2026-03-12] Ceph 데이터 스키마 일원화 파이프라인 대응
+
+### Ceph 데이터 구조체 통합(GHSA/REDMINE)에 따른 전처리 파서 폴백(Fallback) 설계
+- **상황**: 데이터를 수집하는 Collector가 기존 `security`, `releases` 디렉토리를 분리하던 방식에서 모든 JSON 파일을 `ceph_data` 단일 디렉토리로 통합하고, JSON 내부 스키마를 `title`, `description`, `issuedDate` 등의 표준 필드로 평탄화(Flattening)하는 재구조화를 단행함.
+- **해결 방안**: 
+  1. `args.security_dir`와 `args.releases_dir`를 폐기하고 `args.data_dir` 단일 인수로 통합.
+  2. `glob.glob()` 패턴을 `GHSA-*.json`과 `REDMINE-*.json`으로 변경하여 단일 폴더 내에서도 보안/일반 릴리스 파이프라인 분리를 유지.
+  3. 기존 파서 코드에서 값 추출부를 `.get("summary") or .get("title")` 형태로 변경하여, 구형 스키마와 신형 스키마를 모두 에러 없이 소화하도록 하위 호환성 강건화(Robustness) 처리.
+- **교훈**: **외부 데이터 수집기(Collector)의 산출물 스키마가 변경될 때는 기존의 Dictionary Key 파서(`get("old_key")`)를 단순히 삭제·교체하지 말고, 파이썬의 `or` 체이닝을 통해 새로운 Key를 폴백(Fallback)으로 엮어두는 것이 안전하다.** 이렇게 하면 예측 불가능한 과거 데이터 혼재 상황에서도 파이프라인이 붕괴하지 않는다.
+
+---
+
 ## 🟣 [2026-03-11] Ceph 파이프라인 구현 - Prisma 스키마 & 빌드 오류 교훈
 
 ### stage/[stageId]/route.ts 신규 vendor 매핑 누락 버그
@@ -303,3 +315,7 @@
 - **Root Cause**: The BullMQ worker (queue.ts) was running `openclaw ask` which does not emit the necessary stdout logging patterns (e.g. `[LLM-REVIEW] Starting Batch Evaluation`) expected by the progress scraper. Furthermore, the core fixes (RAG and Zod validation loop) implemented in Action Plans 1 and 2 were previously mistakenly added to `src/app/api/pipeline/execute/route.ts`, which is a legacy/unused endpoint in V2 (the dashboard uses `/api/pipeline/run` to drop jobs into BullMQ instead).
 - **Resolution**: Refactored the core execution logic natively into `src/lib/queue.ts`. The worker now sequentially orchestrates data collection, preprocessing, and the 3-tier Zod self-healing loop using pure Node.js spawn promises, explicitly invoking `job.updateProgress()` and `job.log()` to ensure accurate and responsive UI progress tracking for both automated and manual review pipelines.
 
+### 2026-03-11 UI 파이프라인 전처리 추출본 하이라이트 매칭 불일치 해결
+- **문제**: 파이프라인 분석 전처리 데이터 추출본 UI에서 AI가 권고하지 않은 모든 패치가 파란색으로 하이라이트되거나, 아무것도 아예 하이라이트되지 않는 증상이 있었음.
+- **실패 이유**: `page.tsx` 및 `ClientPage.tsx`에서 `isApproved`를 검사할 때, 단순 ID 존재 여부만 확인했음. 하지만 AI 리뷰 파이프라인의 `queue.ts`에는 **Passthrough** 로직이 있어 AI가 스킵한 패치라도 모두 `ReviewedPatch` 테이블에 삽입됨.
+- **교훈**: **단순히 AI 출력 테이블(ReviewedPatch)에 존재한다고 해서 AI가 승인/권고한 것이 아님.** UI에서 특정 필터링/하이라이트를 구현할 때는 반드시 `rPatch.Criticality?.toLowerCase() === 'critical'` 또는 의사 결정 필드까지 **다중 조건(Compound Condition)**으로 검증해야 함. 또한 OS 패치의 경우 UUID(`patch.id`)가 아닌 고유 식별자(`patch.issueId`)를 사용하여 문자열 비교를 해야 매칭 오류를 원천 차단할 수 있음.
