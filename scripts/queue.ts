@@ -28,6 +28,28 @@ export function startWorker() {
             const linuxV2Dir = path.join(process.env.HOME || '/home/citec', '.openclaw/workspace/skills/patch-review/os/linux-v2');
             const cephSkillDir = path.join(process.env.HOME || '/home/citec', '.openclaw/workspace/skills/patch-review/storage/ceph');
 
+            async function withOpenClawLock(jobLog: (msg: string) => Promise<void>, fn: () => Promise<any>): Promise<any> {
+                const lockDir = '/tmp/openclaw_execution.lock';
+                let loggedWaiting = false;
+                while (true) {
+                    try {
+                        fs.mkdirSync(lockDir);
+                        break;
+                    } catch (err: any) {
+                        if (err.code === 'EEXIST') {
+                            if (!loggedWaiting) {
+                                await jobLog("Waiting for another AI process to finish (OpenClaw Global Lock)...");
+                                loggedWaiting = true;
+                            }
+                            await new Promise(r => setTimeout(r, 2000));
+                        } else {
+                            throw err;
+                        }
+                    }
+                }
+                try { return await fn(); } finally { try { fs.rmdirSync(lockDir, { recursive: true }); } catch(e) {} }
+            }
+
             const linuxSkillDir = linuxV2Dir;
             const outputReportFilename = job.name === 'manual-review' ? `manual_ai_report_${job.id}.json` : 'patch_review_ai_report.json';
 
@@ -162,18 +184,17 @@ export function startWorker() {
                             let parsedJson: any = null;
                             for (let attempt = 1; attempt <= MAX_AI_RETRIES + 1; attempt++) {
                                 try {
-                                    try {
+                                    const rawAiOutput = await withOpenClawLock(async (msg) => await job.log(msg), async () => {
                                         const sessionsDir = path.join(process.env.HOME || '/home/citec', '.openclaw/agents/main/sessions');
                                         if (fs.existsSync(sessionsDir)) {
                                             const oldFiles = fs.readdirSync(sessionsDir).filter((f: string) => f.endsWith('.lock') || f.includes('.jsonl'));
                                             for (const lf of oldFiles) fs.rmSync(path.join(sessionsDir, lf), { force: true });
                                         }
-                                    } catch (cleanErr) { }
-
-                                    const rawAiOutput = await runCephStream('/home/citec/.nvm/versions/node/v22.22.0/bin/openclaw',
-                                        ['agent', '--agent', 'main', '--json', '-m', prompt],
-                                        {}, { shell: false, cwd: cephSkillDir }, true
-                                    );
+                                        return await runCephStream('/home/citec/.nvm/versions/node/v22.22.0/bin/openclaw',
+                                            ['agent', '--agent', 'main', '--json', '--session-id', `ceph_${job.id}_${i}_${attempt}`, '-m', prompt],
+                                            {}, { shell: false, cwd: cephSkillDir }, true
+                                        );
+                                    });
 
                                     const extractJsonArray = (text: string): any => {
                                         const stripped = text.replace(/```(?:json)?\s*/g, '').replace(/```/g, '');
@@ -382,18 +403,17 @@ export function startWorker() {
 
                         for (let attempt = 1; attempt <= MAX_AI_RETRIES + 1; attempt++) {
                             try {
-                                try {
+                                const rawAiOutput = await withOpenClawLock(async (msg) => await job.log(msg), async () => {
                                     const sessionsDir = path.join(process.env.HOME || '/home/citec', '.openclaw/agents/main/sessions');
                                     if (fs.existsSync(sessionsDir)) {
-                                        const lockFiles = fs.readdirSync(sessionsDir).filter((f: string) => f.endsWith('.lock'));
-                                        for (const lf of lockFiles) fs.rmSync(path.join(sessionsDir, lf), { force: true });
+                                        const oldFiles = fs.readdirSync(sessionsDir).filter((f: string) => f.endsWith('.lock') || f.includes('.jsonl'));
+                                        for (const lf of oldFiles) fs.rmSync(path.join(sessionsDir, lf), { force: true });
                                     }
-                                } catch (cleanErr) { }
-
-                                const rawAiOutput = await runStream('/home/citec/.nvm/versions/node/v22.22.0/bin/openclaw',
-                                    ['agent', '--agent', 'main', '--json', '-m', currentPrompt],
-                                    {}, { shell: false }, true
-                                );
+                                    return await runStream('/home/citec/.nvm/versions/node/v22.22.0/bin/openclaw',
+                                        ['agent', '--agent', 'main', '--json', '--session-id', `os_${job.id}_${i}_${attempt}`, '-m', currentPrompt],
+                                        {}, { shell: false }, true
+                                    );
+                                });
 
                                 const extractJsonArray = (text: string): any => {
                                     const stripped = text.replace(/```(?:json)?\s*/g, '').replace(/```/g, '');
