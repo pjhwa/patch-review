@@ -55,6 +55,9 @@ def preprocess_patches():
             
             if not isinstance(data, dict):
                 continue
+            
+            if os.path.basename(json_path) == 'metadata.json':
+                continue
                 
             patch_id = data.get('id', os.path.basename(json_path).replace('.json', ''))
             vendor = "MariaDB" # Force vendor context
