@@ -296,8 +296,8 @@ def try_write_prisma_db(patches: list) -> int:
             try:
                 cursor.execute("""
                     INSERT OR REPLACE INTO PreprocessedPatch
-                    (id, issueId, vendor, component, version, osVersion, severity, releaseDate, description, url, collectedAt)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, issueId, vendor, component, version, osVersion, severity, releaseDate, description, url, collectedAt, isReviewed, isAiReviewRequested)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
                 """, (
                     p["id"],
                     p["patch_id"],
@@ -309,7 +309,7 @@ def try_write_prisma_db(patches: list) -> int:
                     p.get("issued_date", ""),
                     (p.get("description") or p.get("title") or "")[:4000],
                     p.get("url", ""),
-                    datetime.now().isoformat(),
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 ))
                 count += 1
             except Exception as e:
