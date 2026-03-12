@@ -336,3 +336,8 @@
 - **문제**: 파이프라인 분석 전처리 데이터 추출본 UI에서 AI가 권고하지 않은 모든 패치가 파란색으로 하이라이트되거나, 아무것도 아예 하이라이트되지 않는 증상이 있었음.
 - **실패 이유**: `page.tsx` 및 `ClientPage.tsx`에서 `isApproved`를 검사할 때, 단순 ID 존재 여부만 확인했음. 하지만 AI 리뷰 파이프라인의 `queue.ts`에는 **Passthrough** 로직이 있어 AI가 스킵한 패치라도 모두 `ReviewedPatch` 테이블에 삽입됨.
 - **교훈**: **단순히 AI 출력 테이블(ReviewedPatch)에 존재한다고 해서 AI가 승인/권고한 것이 아님.** UI에서 특정 필터링/하이라이트를 구현할 때는 반드시 `rPatch.Criticality?.toLowerCase() === 'critical'` 또는 의사 결정 필드까지 **다중 조건(Compound Condition)**으로 검증해야 함. 또한 OS 패치의 경우 UUID(`patch.id`)가 아닌 고유 식별자(`patch.issueId`)를 사용하여 문자열 비교를 해야 매칭 오류를 원천 차단할 수 있음.
+
+### 2026-03-12 MariaDB 스크립트 작성 및 풀스택 연동 배포 성공
+- **성공 요인**: `docs/ADDING_NEW_PRODUCT.md` 시스템 문서를 100% 준수하여 Python 데이터 정제부터 Next.js API의 카테고리/벤더 매핑까지 하나도 빠짐없이 체계적으로 구현.
+- **Troubleshooting**: `stage/[stageId]/route.ts`에 MariaDB 벤더 매핑을 잊지 않고 추가하여 (이전 Ceph 사태의 교훈 적용) 데이터 누출(Data Leak/Mix)을 사전에 차단함.
+- **Troubleshooting 2**: Next.js 15 환경에서 `products/route.ts` 수정 시 `category === 'database'` 조건에서 "types have no overlap" 타입스크립트 에러 발생. 상단의 필터 조건문(`if (category !== 'os' && category !== 'storage' && category !== 'database')`)을 미리 확장해두지 않으면 TS 컴파일러가 강제 추론해버린다는 사실을 학습하고 빠르게 핫픽스 후 실서버 무중단 배포(pm2 restart 0) 완료.
